@@ -292,7 +292,7 @@ namespace Baz.Service
                             {
                                 MalzemeTalepSurecTakipID = ilkSurecTakip.TabloID,
                                 SurecStatuGirilenNot = request.SurecStatuGirilenNot,
-                                SurecStatuBildirimTipiID = request.SurecStatuBildirimTipiID,
+                                SurecStatuBildirimTipiID = 0, // Default olarak 0
                                 // BaseModel zorunlu alanları
                                 AktifMi = 1,
                                 SilindiMi = 0,
@@ -483,10 +483,5 @@ namespace Baz.Service
         /// Süreç statüsü için girilen not
         /// </summary>
         public string SurecStatuGirilenNot { get; set; }
-
-        /// <summary>
-        /// Süreç statüsü bildirim tipi ID'si
-        /// </summary>
-        public int SurecStatuBildirimTipiID { get; set; }
     }
 }
