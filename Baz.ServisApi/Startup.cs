@@ -31,13 +31,13 @@ using Baz.Service;
 namespace Baz.IysServiceApi
 {
     /// <summary>
-    /// Uygulamayý ayaða kaldýran class
+    /// Uygulamayï¿½ ayaï¿½a kaldï¿½ran class
     /// </summary>
     [ExcludeFromCodeCoverage]
     public class Startup
     {
         /// <summary>
-        /// Uygulamayý ayaða kaldýran servisin yapýcý methodudur.
+        /// Uygulamayï¿½ ayaï¿½a kaldï¿½ran servisin yapï¿½cï¿½ methodudur.
         /// </summary>
         /// <param name="env"></param>
         public Startup(IWebHostEnvironment env)
@@ -50,7 +50,7 @@ namespace Baz.IysServiceApi
         }
 
         /// <summary>
-        /// Uygulamayý yapýlandýran özellik
+        /// Uygulamayï¿½ yapï¿½landï¿½ran ï¿½zellik
         /// </summary>
         public IConfiguration Configuration { get; }
 
@@ -89,7 +89,7 @@ namespace Baz.IysServiceApi
             
             services.AddSingleton<Baz.Mapper.Pattern.IDataMapper>(new Baz.Mapper.Pattern.Entity.DataMapper(GenerateConfiguratedMapper()));
             //////////////////////////////////////////SESSION SERVER AYARLARI/////////////////////////////////////////////////
-            //Distributed session iþlemleri için session serverýn network baðlantýlarýný yapýlandýrýr.
+            //Distributed session iï¿½lemleri iï¿½in session serverï¿½n network baï¿½lantï¿½larï¿½nï¿½ yapï¿½landï¿½rï¿½r.
             services.AddDistributedSqlServerCache(p =>
             {
                 p.ConnectionString = (Configuration.GetConnectionString("SessionConnection"));
@@ -104,10 +104,10 @@ namespace Baz.IysServiceApi
                 options.IdleTimeout = TimeSpan.FromMinutes(60);
             });
             services.AddSession();
-            //Http desteði olmadan paylaþýmlý session iþlemleri yapan servisi kayýt eder.
+            //Http desteï¿½i olmadan paylaï¿½ï¿½mlï¿½ session iï¿½lemleri yapan servisi kayï¿½t eder.
             services.AddTransient<Baz.SharedSession.ISharedSession, Baz.SharedSession.BaseSharedSession>();
-            //Http desteði olan iþlemler için paylaþýmlý session nesnesinin kaydýný yapar.
-            //BaseSharedSessionForHttpRequest iþlemleri için öncelikle BaseSharedSession servisi kayýt edilmelidir.
+            //Http desteï¿½i olan iï¿½lemler iï¿½in paylaï¿½ï¿½mlï¿½ session nesnesinin kaydï¿½nï¿½ yapar.
+            //BaseSharedSessionForHttpRequest iï¿½lemleri iï¿½in ï¿½ncelikle BaseSharedSession servisi kayï¿½t edilmelidir.
             services.AddTransient<Baz.SharedSession.ISharedSessionForHttpRequest, Baz.SharedSession.BaseSharedSessionForHttpRequest>();
             //////////////////////////////////////////////////////////////////////////////////////
             services.AddScoped<ISistemSayfalariService, SistemSayfalariService>();
@@ -168,6 +168,10 @@ namespace Baz.IysServiceApi
             services.AddScoped<IKaynakTanimlariMedyalarService, KaynakTanimlariMedyalarService>();
             services.AddScoped<ITakvimService, TakvimService>();
             services.AddScoped<IKaynakGunIciIstisnaTanimlariService, KaynakGunIciIstisnaTanimlariService>();
+            services.AddScoped<IMalzemeTalepGenelBilgilerService, MalzemeTalepGenelBilgilerService>();
+            services.AddScoped<IProjeGenelBilgilerService, ProjeGenelBilgilerService>();
+            services.AddScoped<ISurecStatuleriBildirimTipleriService, SurecStatuleriBildirimTipleriService>();
+            services.AddScoped<IParamTalepSurecStatuleriService, ParamTalepSurecStatuleriService>();
 
             //////////////////////////////////////////////////////////////////////////////////////
             services.AddScoped<Repository.Pattern.IUnitOfWork, Repository.Pattern.Entity.UnitOfWork>();
@@ -178,7 +182,7 @@ namespace Baz.IysServiceApi
             var types = typeof(Service.Base.IService<>).Assembly.GetTypes();
             var interfaces = types.Where(p => p.IsInterface && p.GetInterface("IService`1") != null).ToList();
 
-            //Exception loglarýný iþleyen Baz.AOP.Logger.ExceptionLog servisinin kaydýný yapar
+            //Exception loglarï¿½nï¿½ iï¿½leyen Baz.AOP.Logger.ExceptionLog servisinin kaydï¿½nï¿½ yapar
 
 
             services.AddTransient<IRequestHelper, RequestHelper>(provider =>
@@ -198,7 +202,7 @@ namespace Baz.IysServiceApi
         }
 
         ///  <summary>
-        /// Bu yöntem çalýþma zamaný tarafýndan çaðrýlýr. HTTP istek ardýþýk düzenini yapýlandýrmak için bu yöntemi kullanýn.
+        /// Bu yï¿½ntem ï¿½alï¿½ï¿½ma zamanï¿½ tarafï¿½ndan ï¿½aï¿½rï¿½lï¿½r. HTTP istek ardï¿½ï¿½ï¿½k dï¿½zenini yapï¿½landï¿½rmak iï¿½in bu yï¿½ntemi kullanï¿½n.
         ///  </summary>
         ///  <param name="app"></param>
         ///  <param name="env"></param>
@@ -260,7 +264,7 @@ namespace Baz.IysServiceApi
     }
 
     /// <summary>
-    /// Connection Stringi gizlemeyi amaçlayan sýnýf
+    /// Connection Stringi gizlemeyi amaï¿½layan sï¿½nï¿½f
     /// </summary>
     [ExcludeFromCodeCoverage]
     public class ConnectionProtect
@@ -269,7 +273,7 @@ namespace Baz.IysServiceApi
 
         // the 'provider' parameter is provided by DI
         /// <summary>
-        /// Connection Stringi gizlemeyi amaçlayan sýnýfýn yapýcý methodu
+        /// Connection Stringi gizlemeyi amaï¿½layan sï¿½nï¿½fï¿½n yapï¿½cï¿½ methodu
         /// </summary>
         /// <param name="provider"></param>
         public ConnectionProtect(IDataProtectionProvider provider)
@@ -278,7 +282,7 @@ namespace Baz.IysServiceApi
         }
 
         /// <summary>
-        /// Connection stringi gizlemeyi amaçlayan method.
+        /// Connection stringi gizlemeyi amaï¿½layan method.
         /// </summary>
         /// <param name="val"></param>
         /// <returns></returns>

@@ -34,7 +34,7 @@ namespace Baz.IysServiceApi.Controllers
         private readonly IParamPostaciIslemDurumTipleriService _paramPostaciIslemDurumTipleriService;
         private readonly IParamIliskiTurleriService _paramIliskiTurleriService;
         private readonly IKisiService _kisiService;
-    
+        private readonly IParamTalepSurecStatuleriService _paramTalepSurecStatuleriService;
 
         private readonly List<Type> _paramTypes;
         private readonly IServiceProvider _serviceProvider;
@@ -59,7 +59,7 @@ namespace Baz.IysServiceApi.Controllers
         /// <param name="paramIliskiTurleriService"></param>
         /// <param name="ulkeMaskeleriService"></param>
         /// <param name="serviceProvider"></param>
-        public GenelParametrelerController(IKisiService kisiService, IParamCinsiyetService paramCinsiyetService, IParamUlkelerSehirlerService paramUlkelerSehirlerService, IParamMedeniHalService paramMedeniHalService, IParamAdresTipiService paramAdresTipleriService, IParamOkulTipiService paramOkulTipiService, IParamTelefonTipiService paramTelefonTipiService, IParamBankalarSubelerService paramBankalarSubelerService, IParamDinlerService paramDinlerService, IParamCalisanSayilariService paramCalisanSayilariService, IParamKurumLokasyonTipiService paramKurumLokasyonTipiService,  IParamPostaciIslemDurumTipleriService paramPostaciIslemDurumTipleriService, IParamIliskiTurleriService paramIliskiTurleriService,  IServiceProvider serviceProvider)
+        public GenelParametrelerController(IKisiService kisiService, IParamCinsiyetService paramCinsiyetService, IParamUlkelerSehirlerService paramUlkelerSehirlerService, IParamMedeniHalService paramMedeniHalService, IParamAdresTipiService paramAdresTipleriService, IParamOkulTipiService paramOkulTipiService, IParamTelefonTipiService paramTelefonTipiService, IParamBankalarSubelerService paramBankalarSubelerService, IParamDinlerService paramDinlerService, IParamCalisanSayilariService paramCalisanSayilariService, IParamKurumLokasyonTipiService paramKurumLokasyonTipiService,  IParamPostaciIslemDurumTipleriService paramPostaciIslemDurumTipleriService, IParamIliskiTurleriService paramIliskiTurleriService,  IServiceProvider serviceProvider, IParamTalepSurecStatuleriService paramTalepSurecStatuleriService)
         {
             _paramCinsiyetService = paramCinsiyetService;
             _paramUlkelerSehirlerService = paramUlkelerSehirlerService;
@@ -74,6 +74,7 @@ namespace Baz.IysServiceApi.Controllers
             _paramIliskiTurleriService = paramIliskiTurleriService;
             _paramBankalarSubelerService = paramBankalarSubelerService;
             _kisiService = kisiService;
+            _paramTalepSurecStatuleriService = paramTalepSurecStatuleriService;
        
             _serviceProvider = serviceProvider;
             _paramTypes = System.Reflection.Assembly.GetAssembly(typeof(Baz.Service.IParamDillerService)).GetTypes().Where(p => p.IsInterface).ToList();
@@ -182,6 +183,17 @@ namespace Baz.IysServiceApi.Controllers
         public Result<List<ParamCalisanSayilari>> CalisanSayilariList()
         {
             return _paramCalisanSayilariService.List();
+        }
+
+        /// <summary>
+        /// Çalışan sayılarının listelendiği method
+        /// </summary>
+        /// <returns></returns>
+        [Route("TalepSurecStatuleriList")]
+        [HttpGet]
+        public Result<List<ParamTalepSurecStatuleri>> TalepSurecStatuleriList()
+        {
+            return _paramTalepSurecStatuleriService.List();
         }
 
         /// <summary>
