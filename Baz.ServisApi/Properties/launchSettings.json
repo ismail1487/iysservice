@@ -4,7 +4,7 @@
     "anonymousAuthentication": true,
     "iisExpress": {
       //"applicationUrl": "https://localhost:5001", // Mac cihazda burası açık olacak
-      "applicationUrl": "https://localhost:51306", // Windows cihazda burası açık olacak
+      "applicationUrl": "http://localhost:51306", // Windows cihazda burası açık olacak
       "sslPort": 0
     }
   },
@@ -27,7 +27,7 @@
       },
       "dotnetRunMessages": "true",
       //"applicationUrl": "http://localhost:51306" // Mac cihazda burası açık olacak
-      "applicationUrl": "https://localhost:5001", // Windows cihazda burası açık olacak
+      "applicationUrl": "http://localhost:5001", // Windows cihazda burası açık olacak
     },
     "Docker": {
       "commandName": "Docker",
