@@ -79,5 +79,85 @@ namespace Baz.IysServiceApi.Controllers
 
             return _malzemeTalepGenelBilgilerService.MalzemeTalepEt(request);
         }
+
+        /// <summary>
+        /// Malzemeleri hazırlamak ve statüsünü güncellemek için method
+        /// </summary>
+        /// <param name="malzemeTalebiEssizID">Hazırlanacak malzeme talep ID'si</param>
+        /// <returns>Hazırlama işlemi sonucu</returns>
+        [Route("MalzemeleriHazirla/{malzemeTalebiEssizID}")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<bool>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<bool> MalzemeleriHazirla(int malzemeTalebiEssizID)
+        {
+            if (malzemeTalebiEssizID <= 0)
+            {
+                return false.ToResult();
+            }
+
+            return _malzemeTalepGenelBilgilerService.MalzemeleriHazirla(malzemeTalebiEssizID);
+        }
+
+        /// <summary>
+        /// Malzeme talebini iade etme method
+        /// </summary>
+        /// <param name="request">İade parametreleri</param>
+        /// <returns>İade işlemi sonucu</returns>
+        [Route("MalzemeIadeEt")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<bool>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<bool> MalzemeIadeEt([FromBody] MalzemeIadeEtRequest request)
+        {
+            if (request == null || request.MalzemeTalebiEssizID <= 0)
+            {
+                return false.ToResult();
+            }
+
+            return _malzemeTalepGenelBilgilerService.MalzemeIadeEt(request);
+        }
+
+        /// <summary>
+        /// Mal kabul etme method
+        /// </summary>
+        /// <param name="malzemeTalebiEssizID">Kabul edilecek malzeme talep ID'si</param>
+        /// <returns>Kabul işlemi sonucu</returns>
+        [Route("MalKabulEt/{malzemeTalebiEssizID}")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<bool>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<bool> MalKabulEt(int malzemeTalebiEssizID)
+        {
+            if (malzemeTalebiEssizID <= 0)
+            {
+                return false.ToResult();
+            }
+
+            return _malzemeTalepGenelBilgilerService.MalKabulEt(malzemeTalebiEssizID);
+        }
+
+        /// <summary>
+        /// Malzemeyi hasarlı olarak işaretleme method
+        /// </summary>
+        /// <param name="request">Hasarlı işaretleme parametreleri</param>
+        /// <returns>İşaretleme işlemi sonucu</returns>
+        [Route("HasarliOlarakIsaretle")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<bool>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<bool> HasarliOlarakIsaretle([FromBody] HasarliOlarakIşaretleRequest request)
+        {
+            if (request == null || request.MalzemeTalebiEssizID <= 0)
+            {
+                return false.ToResult();
+            }
+
+            return _malzemeTalepGenelBilgilerService.HasarliOlarakIsaretle(request);
+        }
     }
 }

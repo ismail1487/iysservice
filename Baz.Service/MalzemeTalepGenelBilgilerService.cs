@@ -37,6 +37,34 @@ namespace Baz.Service
         /// <param name="talepSurecStatuIDs">Talep süreç statü ID'leri</param>
         /// <returns>Filtrelenmiş malzeme talep listesi</returns>
         Result<List<MalzemeTalepGenelBilgiler>> MalzemeTalepList(bool malzemeTalepEtGetir = false, List<int> talepSurecStatuIDs = null);
+
+        /// <summary>
+        /// Malzemeleri hazırlamak ve statüsünü güncellemek için metod
+        /// </summary>
+        /// <param name="malzemeTalebiEssizID">Hazırlanacak malzeme talep ID'si</param>
+        /// <returns>Hazırlama işlemi sonucu</returns>
+        Result<bool> MalzemeleriHazirla(int malzemeTalebiEssizID);
+
+        /// <summary>
+        /// Malzeme talebini iade etme metodu
+        /// </summary>
+        /// <param name="request">İade parametreleri</param>
+        /// <returns>İade işlemi sonucu</returns>
+        Result<bool> MalzemeIadeEt(MalzemeIadeEtRequest request);
+
+        /// <summary>
+        /// Malzeme kabul etme metodu
+        /// </summary>
+        /// <param name="malzemeTalebiEssizID">Kabul edilecek malzeme talep ID'si</param>
+        /// <returns>Kabul işlemi sonucu</returns>
+        Result<bool> MalKabulEt(int malzemeTalebiEssizID);
+
+        /// <summary>
+        /// Malzemeyi hasarlı olarak işaretleme metodu
+        /// </summary>
+        /// <param name="request">Hasarlı işaretleme parametreleri</param>
+        /// <returns>İşaretleme işlemi sonucu</returns>
+        Result<bool> HasarliOlarakIsaretle(HasarliOlarakIşaretleRequest request);
     }
 
     /// <summary>
@@ -47,6 +75,7 @@ namespace Baz.Service
         private readonly IRepository<MalzemeTalepSurecTakip> _surecTakipRepository;
         private readonly IRepository<MalzemeTalepMiktarTarihcesi> _miktarTarihcesiRepository;
         private readonly IRepository<MalzemeTalepSurecTakipNotlari> _surecTakipNotlariRepository;
+        private readonly IRepository<SurecStatuleriBildirimTipleri> _surecStatuleriBildirimTipleriRepository;
         private readonly ILoginUser _loginUser;
 
         /// <summary>
@@ -59,6 +88,7 @@ namespace Baz.Service
         /// <param name="surecTakipRepository"></param>
         /// <param name="miktarTarihcesiRepository"></param>
         /// <param name="surecTakipNotlariRepository"></param>
+        /// <param name="surecStatuleriBildirimTipleriRepository"></param>
         /// <param name="loginUser"></param>
         public MalzemeTalepGenelBilgilerService(
             IRepository<MalzemeTalepGenelBilgiler> repository,
@@ -68,11 +98,13 @@ namespace Baz.Service
             IRepository<MalzemeTalepSurecTakip> surecTakipRepository,
             IRepository<MalzemeTalepMiktarTarihcesi> miktarTarihcesiRepository,
             IRepository<MalzemeTalepSurecTakipNotlari> surecTakipNotlariRepository,
+            IRepository<SurecStatuleriBildirimTipleri> surecStatuleriBildirimTipleriRepository,
             ILoginUser loginUser) : base(repository, dataMapper, serviceProvider, logger)
         {
             _surecTakipRepository = surecTakipRepository;
             _miktarTarihcesiRepository = miktarTarihcesiRepository;
             _surecTakipNotlariRepository = surecTakipNotlariRepository;
+            _surecStatuleriBildirimTipleriRepository = surecStatuleriBildirimTipleriRepository;
             _loginUser = loginUser;
         }
 
@@ -179,11 +211,52 @@ namespace Baz.Service
                     // Kalan miktarı hesapla
                     var kalanMiktar = malzeme.MalzemeOrijinalTalepEdilenMiktar - sevkEdilenToplam;
 
+                    // MalzemeTalepSurecTakip kaydını bul
+                    var surecTakip = _surecTakipRepository.List(st =>
+                        st.MalzemeTalebiEssizID == malzeme.MalzemeTalebiEssizID && st.AktifMi == 1)
+                        .FirstOrDefault();
+
+                    // En son notları bul (varsa)
+                    string surecStatuGirilenNot = null;
+                    int? surecStatuBildirimTipiID = null;
+                    string bildirimTipiTanimlama = null;
+
+                    if (surecTakip != null)
+                    {
+                        var enSonNot = _surecTakipNotlariRepository.List(n =>
+                            n.MalzemeTalepSurecTakipID == surecTakip.TabloID && n.AktifMi == 1)
+                            .OrderByDescending(n => n.TabloID)
+                            .FirstOrDefault();
+
+                        if (enSonNot != null)
+                        {
+                            surecStatuGirilenNot = enSonNot.SurecStatuGirilenNot;
+                            surecStatuBildirimTipiID = enSonNot.SurecStatuBildirimTipiID;
+
+                            // Bildirim tipi tanımlamasını bul (varsa)
+                            if (surecStatuBildirimTipiID.HasValue && surecStatuBildirimTipiID.Value > 0)
+                            {
+                                var bildirimTipi = _surecStatuleriBildirimTipleriRepository.List(bt =>
+                                    bt.TabloID == surecStatuBildirimTipiID.Value && bt.AktifMi == 1)
+                                    .FirstOrDefault();
+
+                                if (bildirimTipi != null)
+                                {
+                                    bildirimTipiTanimlama = bildirimTipi.BildirimTipiTanimlama;
+                                }
+                            }
+                        }
+                    }
+
                     detayliSonuclar.Add(new MalzemeTalepDetayResponse
                     {
                         MalzemeTalep = malzeme,
                         ToplamSevkEdilenMiktar = sevkEdilenToplam,
-                        KalanMiktar = Math.Max(0, kalanMiktar) // Negatif değer olmasın
+                        KalanMiktar = Math.Max(0, kalanMiktar), // Negatif değer olmasın
+                        ParamTalepSurecStatuID = surecTakip?.ParamTalepSurecStatuID,
+                        SurecStatuGirilenNot = surecStatuGirilenNot,
+                        SurecStatuBildirimTipiID = surecStatuBildirimTipiID,
+                        BildirimTipiTanimlama = bildirimTipiTanimlama
                     });
                 }
 
@@ -241,9 +314,9 @@ namespace Baz.Service
                         SevkEdilenMiktar = aktarılacakMiktar, // Düzeltilmiş miktar
                         KalanMiktar = kalanMiktar,
                         SevkZamani = DateTime.Now, // Local time
-                        SevkTalepEdenKisiID = request.SevkTalepEdenKisiID,
-                        MalzemeSevkTalebiYapanDepartmanID = request.MalzemeSevkTalebiYapanDepartmanID,
-                        MalzemeSevkTalebiYapanKisiID = request.MalzemeSevkTalebiYapanKisiID,
+                        SevkTalepEdenKisiID = _loginUser.KisiID,
+                        MalzemeSevkTalebiYapanDepartmanID = _loginUser.KurumID,
+                        MalzemeSevkTalebiYapanKisiID = _loginUser.KisiID,
                         // BaseModel zorunlu alanları
                         AktifMi = 1,
                         SilindiMi = 0,
@@ -399,6 +472,256 @@ namespace Baz.Service
                 throw new Exception("Malzeme talepleri getirilirken hata oluştu: " + ex.Message);
             }
         }
+
+        /// <summary>
+        /// Malzemeleri hazırlamak ve statüsünü güncellemek için metod
+        /// </summary>
+        /// <param name="malzemeTalebiEssizID">Hazırlanacak malzeme talep ID'si</param>
+        /// <returns>Hazırlama işlemi sonucu</returns>
+        public Result<bool> MalzemeleriHazirla(int malzemeTalebiEssizID)
+        {
+            try
+            {
+                if (malzemeTalebiEssizID <= 0)
+                {
+                    throw new Exception("Geçerli bir malzeme talep ID'si gereklidir.");
+                }
+
+                // İlgili MalzemeTalepSurecTakip kaydını bul
+                var surecTakip = _surecTakipRepository.List(st =>
+                    st.MalzemeTalebiEssizID == malzemeTalebiEssizID && st.AktifMi == 1)
+                    .FirstOrDefault();
+
+                if (surecTakip == null)
+                {
+                    throw new Exception("Belirtilen malzeme talebine ait kayıt bulunamadı.");
+                }
+
+                // Kaydın statüsünü 4 olarak güncelle
+                surecTakip.ParamTalepSurecStatuID = 4;
+                surecTakip.GuncellenmeTarihi = DateTime.Now;
+                surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 1;
+
+                var updateResult = _surecTakipRepository.Update(surecTakip);
+                var saveResult = _surecTakipRepository.SaveChanges();
+                
+                if (saveResult <= 0)
+                {
+                    throw new Exception("Statü güncellemesi kaydedilemedi.");
+                }
+
+                return true.ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "MalzemeleriHazirla hatası: {Message}", ex.Message);
+                throw new Exception("Malzeme hazırlama işlemi sırasında hata oluştu: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Malzeme talebini iade etme metodu
+        /// </summary>
+        /// <param name="request">İade parametreleri</param>
+        /// <returns>İade işlemi sonucu</returns>
+        public Result<bool> MalzemeIadeEt(MalzemeIadeEtRequest request)
+        {
+            try
+            {
+                if (request == null || request.MalzemeTalebiEssizID <= 0)
+                {
+                    throw new Exception("Geçerli bir malzeme talep ID'si gereklidir.");
+                }
+
+                // 1. MalzemeTalepSurecTakip kaydını bul ve statüsünü 5 olarak güncelle
+                var surecTakip = _surecTakipRepository.List(st =>
+                    st.MalzemeTalebiEssizID == request.MalzemeTalebiEssizID && st.AktifMi == 1)
+                    .FirstOrDefault();
+
+                if (surecTakip == null)
+                {
+                    throw new Exception("Belirtilen malzeme talebine ait kayıt bulunamadı.");
+                }
+
+                // Statüsünü 5 olarak güncelle (İade)
+                surecTakip.ParamTalepSurecStatuID = 5;
+                surecTakip.GuncellenmeTarihi = DateTime.Now;
+                surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 1;
+
+                var updateResult = _surecTakipRepository.Update(surecTakip);
+                var saveResult = _surecTakipRepository.SaveChanges();
+
+                if (saveResult <= 0)
+                {
+                    throw new Exception("Statü güncellemesi kaydedilemedi.");
+                }
+
+                // 2. MalzemeTalepSurecTakipNotlari tablosuna yeni not kaydı ekle
+                try
+                {
+                    var surecNot = new MalzemeTalepSurecTakipNotlari
+                    {
+                        MalzemeTalepSurecTakipID = surecTakip.TabloID,
+                        SurecStatuGirilenNot = request.SurecStatuGirilenNot,
+                        SurecStatuBildirimTipiID = request.SurecStatuBildirimTipiID,
+                        // BaseModel zorunlu alanları
+                        AktifMi = 1,
+                        SilindiMi = 0,
+                        DilID = 1,
+                        KisiID = _loginUser?.KisiID ?? 1,
+                        KurumID = _loginUser?.KurumID ?? 1,
+                        KayitTarihi = DateTime.Now,
+                        KayitEdenID = _loginUser?.KisiID ?? 1,
+                        GuncellenmeTarihi = DateTime.Now,
+                        GuncelleyenKisiID = _loginUser?.KisiID ?? 1
+                    };
+
+                    var notResult = _surecTakipNotlariRepository.Add(surecNot);
+                    var notSaveResult = _surecTakipNotlariRepository.SaveChanges();
+
+                    if (notSaveResult <= 0)
+                    {
+                        throw new Exception("Süreç takip notu kaydedilemedi.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception("Süreç takip notu kaydı sırasında hata: " + ex.Message + (ex.InnerException != null ? " Inner: " + ex.InnerException.Message : ""));
+                }
+
+                return true.ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "MalzemeIadeEt hatası: {Message}", ex.Message);
+                throw new Exception("Malzeme iade işlemi sırasında hata oluştu: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Malzeme kabul etme metodu
+        /// </summary>
+        /// <param name="malzemeTalebiEssizID">Kabul edilecek malzeme talep ID'si</param>
+        /// <returns>Kabul işlemi sonucu</returns>
+        public Result<bool> MalKabulEt(int malzemeTalebiEssizID)
+        {
+            try
+            {
+                if (malzemeTalebiEssizID <= 0)
+                {
+                    throw new Exception("Geçerli bir malzeme talep ID'si gereklidir.");
+                }
+
+                // İlgili MalzemeTalepSurecTakip kaydını bul
+                var surecTakip = _surecTakipRepository.List(st =>
+                    st.MalzemeTalebiEssizID == malzemeTalebiEssizID && st.AktifMi == 1)
+                    .FirstOrDefault();
+
+                if (surecTakip == null)
+                {
+                    throw new Exception("Belirtilen malzeme talebine ait kayıt bulunamadı.");
+                }
+
+                // Kaydın statüsünü 6 olarak güncelle (Mal Kabul Edildi)
+                surecTakip.ParamTalepSurecStatuID = 6;
+                surecTakip.GuncellenmeTarihi = DateTime.Now;
+                surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 1;
+
+                var updateResult = _surecTakipRepository.Update(surecTakip);
+                var saveResult = _surecTakipRepository.SaveChanges();
+
+                if (saveResult <= 0)
+                {
+                    throw new Exception("Statü güncellemesi kaydedilemedi.");
+                }
+
+                return true.ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "MalKabulEt hatası: {Message}", ex.Message);
+                throw new Exception("Mal kabul işlemi sırasında hata oluştu: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Malzemeyi hasarlı olarak işaretleme metodu
+        /// </summary>
+        /// <param name="request">Hasarlı işaretleme parametreleri</param>
+        /// <returns>İşaretleme işlemi sonucu</returns>
+        public Result<bool> HasarliOlarakIsaretle(HasarliOlarakIşaretleRequest request)
+        {
+            try
+            {
+                if (request == null || request.MalzemeTalebiEssizID <= 0)
+                {
+                    throw new Exception("Geçerli bir malzeme talep ID'si gereklidir.");
+                }
+
+                // 1. MalzemeTalepSurecTakip kaydını bul ve statüsünü 7 olarak güncelle
+                var surecTakip = _surecTakipRepository.List(st =>
+                    st.MalzemeTalebiEssizID == request.MalzemeTalebiEssizID && st.AktifMi == 1)
+                    .FirstOrDefault();
+
+                if (surecTakip == null)
+                {
+                    throw new Exception("Belirtilen malzeme talebine ait kayıt bulunamadı.");
+                }
+
+                // Statüsünü 7 olarak güncelle (Hasarlı)
+                surecTakip.ParamTalepSurecStatuID = 7;
+                surecTakip.GuncellenmeTarihi = DateTime.Now;
+                surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 1;
+
+                var updateResult = _surecTakipRepository.Update(surecTakip);
+                var saveResult = _surecTakipRepository.SaveChanges();
+
+                if (saveResult <= 0)
+                {
+                    throw new Exception("Statü güncellemesi kaydedilemedi.");
+                }
+
+                // 2. MalzemeTalepSurecTakipNotlari tablosuna yeni not kaydı ekle
+                try
+                {
+                    var surecNot = new MalzemeTalepSurecTakipNotlari
+                    {
+                        MalzemeTalepSurecTakipID = surecTakip.TabloID,
+                        SurecStatuGirilenNot = request.SurecStatuGirilenNot,
+                        SurecStatuBildirimTipiID = request.SurecStatuBildirimTipiID,
+                        // BaseModel zorunlu alanları
+                        AktifMi = 1,
+                        SilindiMi = 0,
+                        DilID = 1,
+                        KisiID = _loginUser?.KisiID ?? 1,
+                        KurumID = _loginUser?.KurumID ?? 1,
+                        KayitTarihi = DateTime.Now,
+                        KayitEdenID = _loginUser?.KisiID ?? 1,
+                        GuncellenmeTarihi = DateTime.Now,
+                        GuncelleyenKisiID = _loginUser?.KisiID ?? 1
+                    };
+
+                    var notResult = _surecTakipNotlariRepository.Add(surecNot);
+                    var notSaveResult = _surecTakipNotlariRepository.SaveChanges();
+
+                    if (notSaveResult <= 0)
+                    {
+                        throw new Exception("Süreç takip notu kaydedilemedi.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception("Süreç takip notu kaydı sırasında hata: " + ex.Message + (ex.InnerException != null ? " Inner: " + ex.InnerException.Message : ""));
+                }
+
+                return true.ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "HasarliOlarakIsaretle hatası: {Message}", ex.Message);
+                throw new Exception("Malzemeyi hasarlı olarak işaretleme işlemi sırasında hata oluştu: " + ex.Message);
+            }
+        }
     }
 
     /// <summary>
@@ -447,6 +770,26 @@ namespace Baz.Service
         /// Kalan miktar (Orijinal - Sevk Edilen)
         /// </summary>
         public int KalanMiktar { get; set; }
+
+        /// <summary>
+        /// Talep süreç statü ID'si
+        /// </summary>
+        public int? ParamTalepSurecStatuID { get; set; }
+
+        /// <summary>
+        /// Süreç statüsü için girilen son not
+        /// </summary>
+        public string SurecStatuGirilenNot { get; set; }
+
+        /// <summary>
+        /// Süreç statü bildirim tipi ID'si
+        /// </summary>
+        public int? SurecStatuBildirimTipiID { get; set; }
+
+        /// <summary>
+        /// Bildirim tipi tanımlaması
+        /// </summary>
+        public string BildirimTipiTanimlama { get; set; }
     }
 
     /// <summary>
@@ -478,6 +821,59 @@ namespace Baz.Service
         /// Malzeme sevk talebinde bulunan kişi ID'si
         /// </summary>
         public int MalzemeSevkTalebiYapanKisiID { get; set; }
+
+        /// <summary>
+        /// Süreç statüsü için girilen not
+        /// </summary>
+        public string SurecStatuGirilenNot { get; set; }
+    }
+
+    /// <summary>
+    /// Malzemeleri hazırlama request modeli
+    /// </summary>
+    public class MalzemeleriHazirlaRequest
+    {
+        /// <summary>
+        /// Hazırlanacak malzeme talep ID'si
+        /// </summary>
+        public int MalzemeTalebiEssizID { get; set; }
+    }
+
+    /// <summary>
+    /// Malzeme iade etme request modeli
+    /// </summary>
+    public class MalzemeIadeEtRequest
+    {
+        /// <summary>
+        /// İade edilecek malzeme talep ID'si
+        /// </summary>
+        public int MalzemeTalebiEssizID { get; set; }
+
+        /// <summary>
+        /// Süreç statü bildirim tipi ID'si
+        /// </summary>
+        public int SurecStatuBildirimTipiID { get; set; }
+
+        /// <summary>
+        /// Süreç statüsü için girilen not
+        /// </summary>
+        public string SurecStatuGirilenNot { get; set; }
+    }
+
+    /// <summary>
+    /// Malzemeyi hasarlı olarak işaretleme request modeli
+    /// </summary>
+    public class HasarliOlarakIşaretleRequest
+    {
+        /// <summary>
+        /// İşaretlenecek malzeme talep ID'si
+        /// </summary>
+        public int MalzemeTalebiEssizID { get; set; }
+
+        /// <summary>
+        /// Süreç statü bildirim tipi ID'si
+        /// </summary>
+        public int SurecStatuBildirimTipiID { get; set; }
 
         /// <summary>
         /// Süreç statüsü için girilen not
