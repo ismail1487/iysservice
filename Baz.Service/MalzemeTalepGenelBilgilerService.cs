@@ -115,9 +115,12 @@ namespace Baz.Service
                 // Statü filtresi
                 if (request.MalzemeTalepEtGetir)
                 {
-                    var statusOneOrTwo = surecQuery.Where(x =>
+                    // ✅ Hemen ToList() ile belleğe al
+                    var statusOneOrTwoIds = surecQuery.Where(x =>
                         x.ParamTalepSurecStatuID == 1 ||
-                        x.ParamTalepSurecStatuID == 2);
+                        x.ParamTalepSurecStatuID == 2)
+                        .Select(x => x.TabloID)
+                        .ToList();
 
                     var allMalzemeler = _repository.List(x => x.AktifMi == 1).ToList();
                     var kalanMiktarVarIds = new List<int>();
@@ -134,18 +137,23 @@ namespace Baz.Service
                         }
                     }
 
-                    var kalanMiktarSurecler = _surecTakipRepository.List(x =>
+                    var kalanMiktarSureclerIds = _surecTakipRepository.List(x =>
                         kalanMiktarVarIds.Contains(x.MalzemeTalebiEssizID) && x.AktifMi == 1)
+                        .AsEnumerable() // ✅ Önce belleğe al
                         .GroupBy(x => x.MalzemeTalebiEssizID)
-                        .Select(g => g.OrderByDescending(x => x.TabloID).First())
+                        .Select(g => g.OrderByDescending(x => x.TabloID).First().TabloID)
                         .ToList();
 
-                    var combinedIds = statusOneOrTwo.Select(x => x.TabloID)
-                        .Union(kalanMiktarSurecler.Select(x => x.TabloID))
-                        .ToList();
+                    // ✅ Her iki liste de artık List<int>
+                    var combinedIds = statusOneOrTwoIds.Union(kalanMiktarSureclerIds).ToList();
 
                     surecQuery = _surecTakipRepository.List(x =>
                         combinedIds.Contains(x.TabloID) && x.AktifMi == 1);
+                    
+                    if (request.TalepSurecStatuIDs != null && request.TalepSurecStatuIDs.Any())
+                    {
+                        surecQuery = surecQuery.Where(x => request.TalepSurecStatuIDs.Contains(x.ParamTalepSurecStatuID));
+                    }
                 }
                 else if (request.TalepSurecStatuIDs != null && request.TalepSurecStatuIDs.Any())
                 {
@@ -205,7 +213,6 @@ namespace Baz.Service
 
                     var enSonNot = _surecTakipNotlariRepository.List(n =>
                         n.MalzemeTalepSurecTakipID == surecTakip.TabloID && n.AktifMi == 1)
-                        .AsEnumerable()
                         .OrderByDescending(n => n.TabloID)
                         .FirstOrDefault();
 
@@ -233,7 +240,8 @@ namespace Baz.Service
                     });
                 }
 
-                return detayliSonuclar.ToResult();
+                return detayliSonuclar
+                    .ToResult();
             }
             catch (Exception ex)
             {
@@ -250,7 +258,7 @@ namespace Baz.Service
         {
             try
             {
-                // 1. MalzemeTalepGenelBilgiler'den orijinal miktarı al
+                // 1. Ana malzeme kaydı
                 var malzemeTalep = List(x =>
                     x.MalzemeTalebiEssizID == request.MalzemeTalebiEssizID && x.AktifMi == 1).Value.FirstOrDefault();
 
@@ -259,38 +267,55 @@ namespace Baz.Service
                     throw new Exception("Malzeme talebi bulunamadı.");
                 }
 
-                // 2. Önceki sevk edilen miktarları hesapla
-                var oncekiSevklerResult = _miktarTarihcesiRepository.List(x =>
+                // 2. Kalan miktar kontrolü
+                var oncekiSevkler = _miktarTarihcesiRepository.List(x =>
                     x.MalzemeTalebiEssizID == request.MalzemeTalebiEssizID && x.AktifMi == 1).ToList();
 
-                var toplamSevkEdilen = oncekiSevklerResult.Sum(x => x.SevkEdilenMiktar);
-
-                // 3. Mevcut kalan miktarı hesapla
+                var toplamSevkEdilen = oncekiSevkler.Sum(x => x.SevkEdilenMiktar);
                 var mevcutKalanMiktar = malzemeTalep.MalzemeOrijinalTalepEdilenMiktar - toplamSevkEdilen;
-
-                // 4. Talep edilen miktar mevcut kalan miktardan fazla olamaz
                 var aktarılacakMiktar = Math.Min(request.SevkEdilenMiktar, Math.Max(0, mevcutKalanMiktar));
-                var kalanMiktar = Math.Max(0, mevcutKalanMiktar - aktarılacakMiktar);
 
-                // Validasyon: Eğer hiç aktarılacak miktar yoksa hata ver
                 if (aktarılacakMiktar <= 0)
                 {
-                    throw new Exception($"Talep edilen miktar ({request.SevkEdilenMiktar}) mevcut kalan miktardan ({mevcutKalanMiktar}) fazla. Aktarılabilir miktar: {Math.Max(0, mevcutKalanMiktar)}");
+                    throw new Exception($"Talep edilen miktar ({request.SevkEdilenMiktar}) mevcut kalan miktardan ({mevcutKalanMiktar}) fazla.");
                 }
 
-                // 5. MalzemeTalepMiktarTarihcesi tablosuna yeni kayıt ekle
-                try
+                var kalanMiktar = Math.Max(0, mevcutKalanMiktar - aktarılacakMiktar);
+
+                // 3. ⭐ Süreç takip kontrolü: Güncelle mi, yeni mi?
+                var enSonSurecTakip = _surecTakipRepository.List(x =>
+                    x.MalzemeTalebiEssizID == request.MalzemeTalebiEssizID && x.AktifMi == 1)
+                    .OrderByDescending(x => x.TabloID)
+                    .FirstOrDefault();
+
+                // ⭐ Aktif süreç takip kaydını tutacak değişken
+                MalzemeTalepSurecTakip aktifSurecTakip = null;
+
+                if (enSonSurecTakip != null && 
+                    (enSonSurecTakip.ParamTalepSurecStatuID == 1 || enSonSurecTakip.ParamTalepSurecStatuID == 2))
                 {
-                    var miktarTarihcesi = new MalzemeTalepMiktarTarihcesi
+                    // ⭐ İlk kez talep ediliyor → Mevcut kaydı güncelle
+                    enSonSurecTakip.ParamTalepSurecStatuID = 3;
+                    enSonSurecTakip.SurecTetiklenmeZamani = DateTime.Now;
+                    enSonSurecTakip.SurecTetikleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID;
+                    enSonSurecTakip.GuncellenmeTarihi = DateTime.Now;
+                    enSonSurecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID;
+
+                    _surecTakipRepository.Update(enSonSurecTakip);
+                    _surecTakipRepository.SaveChanges();
+
+                    // ⭐ Güncellenmiş kaydı kullan
+                    aktifSurecTakip = enSonSurecTakip;
+                }
+                else
+                {
+                    // ⭐ Paralel süreç → Yeni kayıt oluştur
+                    var yeniSurecTakip = new MalzemeTalepSurecTakip
                     {
                         MalzemeTalebiEssizID = request.MalzemeTalebiEssizID,
-                        SevkEdilenMiktar = aktarılacakMiktar, // Düzeltilmiş miktar
-                        KalanMiktar = kalanMiktar,
-                        SevkZamani = DateTime.Now, // Local time
-                        SevkTalepEdenKisiID = _loginUser.KisiID,
-                        MalzemeSevkTalebiYapanDepartmanID = _loginUser.KurumID,
-                        MalzemeSevkTalebiYapanKisiID = _loginUser.KisiID,
-                        // BaseModel zorunlu alanları
+                        ParamTalepSurecStatuID = 3,
+                        SurecTetiklenmeZamani = DateTime.Now,
+                        SurecTetikleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
                         AktifMi = 1,
                         SilindiMi = 0,
                         DilID = 1,
@@ -302,80 +327,64 @@ namespace Baz.Service
                         GuncelleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID
                     };
 
-                    var tarihceResult = _miktarTarihcesiRepository.Add(miktarTarihcesi);
-                    var tarihceSaveResult = _miktarTarihcesiRepository.SaveChanges();
-                    if (tarihceSaveResult <= 0)
-                    {
-                        throw new Exception("Miktar tarihçesi kaydedilemedi.");
-                    }
+                    _surecTakipRepository.Add(yeniSurecTakip);
+                    _surecTakipRepository.SaveChanges();
+
+                    // ⭐ Yeni oluşturulan kaydı kullan
+                    aktifSurecTakip = yeniSurecTakip;
                 }
-                catch (Exception ex)
+
+                // 4. ⭐ Miktar tarihçesi - FK ile bağla (aktifSurecTakip artık tanımlı)
+                var miktarTarihcesi = new MalzemeTalepMiktarTarihcesi
                 {
-                    throw new Exception("Miktar tarihçesi kaydı sırasında hata: " + ex.Message + (ex.InnerException != null ? " Inner: " + ex.InnerException.Message : ""));
-                }
+                    MalzemeTalebiEssizID = request.MalzemeTalebiEssizID,
+                    MalzemeTalepSurecTakipID = aktifSurecTakip.TabloID, // ✅ ARTIK TANIMLI
+                    SevkEdilenMiktar = aktarılacakMiktar,
+                    KalanMiktar = kalanMiktar,
+                    SevkZamani = DateTime.Now,
+                    SevkTalepEdenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
+                    MalzemeSevkTalebiYapanDepartmanID = _loginUser?.KurumID ?? 1,
+                    MalzemeSevkTalebiYapanKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
+                    AktifMi = 1,
+                    SilindiMi = 0,
+                    DilID = 1,
+                    KisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
+                    KurumID = _loginUser?.KurumID ?? 1,
+                    KayitTarihi = DateTime.Now,
+                    KayitEdenID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
+                    GuncellenmeTarihi = DateTime.Now,
+                    GuncelleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID
+                };
 
-                // 5. MalzemeTalepSurecTakip tablosundaki kaydı güncelle (ParamTalepSurecStatuID = 3)
-                try
+                _miktarTarihcesiRepository.Add(miktarTarihcesi);
+                _miktarTarihcesiRepository.SaveChanges();
+
+                // 5. Not ekle
+                var surecNot = new MalzemeTalepSurecTakipNotlari
                 {
-                    var surecTakipList = _surecTakipRepository.List(x =>
-                        x.MalzemeTalebiEssizID == request.MalzemeTalebiEssizID && x.AktifMi == 1).ToList();
+                    MalzemeTalepSurecTakipID = aktifSurecTakip.TabloID, // ✅ ARTIK TANIMLI
+                    SurecStatuGirilenNot = request.SurecStatuGirilenNot,
+                    SurecStatuBildirimTipiID = 0,
+                    AktifMi = 1,
+                    SilindiMi = 0,
+                    DilID = 1,
+                    KisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
+                    KurumID = _loginUser?.KurumID ?? 1,
+                    KayitTarihi = DateTime.Now,
+                    KayitEdenID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
+                    GuncellenmeTarihi = DateTime.Now,
+                    GuncelleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID
+                };
 
-                    if (surecTakipList.Any())
-                    {
-                        var ilkSurecTakip = surecTakipList.First();
-                        ilkSurecTakip.ParamTalepSurecStatuID = 3; // Hazırlandı
-
-                        var surecUpdateResult = _surecTakipRepository.Update(ilkSurecTakip);
-                        var surecSaveResult = _surecTakipRepository.SaveChanges();
-                        if (surecSaveResult <= 0)
-                        {
-                            throw new Exception("Süreç takip güncellenemedi.");
-                        }
-
-                        try
-                        {
-                            var surecNot = new MalzemeTalepSurecTakipNotlari
-                            {
-                                MalzemeTalepSurecTakipID = ilkSurecTakip.TabloID,
-                                SurecStatuGirilenNot = request.SurecStatuGirilenNot,
-                                SurecStatuBildirimTipiID = 0, // Default olarak 0
-                                // BaseModel zorunlu alanları
-                                AktifMi = 1,
-                                SilindiMi = 0,
-                                DilID = 1,
-                                KisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                                KurumID = _loginUser?.KurumID ?? 1,
-                                KayitTarihi = DateTime.Now,
-                                KayitEdenID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                                GuncellenmeTarihi = DateTime.Now,
-                                GuncelleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID
-                            };
-
-                            var notResult = _surecTakipNotlariRepository.Add(surecNot);
-                            var notSaveResult = _surecTakipNotlariRepository.SaveChanges();
-                            if (notSaveResult <= 0)
-                            {
-                                throw new Exception("Süreç takip notu kaydedilemedi.");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            throw new Exception("Süreç takip notu kaydı sırasında hata: " + ex.Message + (ex.InnerException != null ? " Inner: " + ex.InnerException.Message : ""));
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("Süreç takip güncellemesi sırasında hata: " + ex.Message + (ex.InnerException != null ? " Inner: " + ex.InnerException.Message : ""));
-                }
+                _surecTakipNotlariRepository.Add(surecNot);
+                _surecTakipNotlariRepository.SaveChanges();
 
                 return true.ToResult();
             }
             catch (Exception ex)
             {
-                // Inner exception detayını da logla
-                var innerMessage = ex.InnerException != null ? " Inner Exception: " + ex.InnerException.Message : "";
-                throw new Exception("Malzeme talep edilirken hata oluştu: " + ex.Message + innerMessage);
+                _logger.LogError(ex, "MalzemeTalepEt hatası: {Message}", ex.Message);
+                throw new Exception("Malzeme talep edilirken hata oluştu: " + ex.Message);
             }
         }
 

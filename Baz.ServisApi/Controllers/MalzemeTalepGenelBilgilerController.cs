@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Baz.Model.Entity;
 using Baz.ProcessResult;
 using Baz.Service;
 using Microsoft.AspNetCore.Http;
@@ -46,21 +45,6 @@ namespace Baz.IysServiceApi.Controllers
         }
 
         /// <summary>
-        /// Malzeme taleplerini listeleyen method (koşullu filtreleme ile)
-        /// </summary>
-        /// <param name="malzemeTalepEtGetir">True ise: [1,2] statüleri veya kalan miktar > 0 olanları getirir</param>
-        /// <param name="talepSurecStatuIDs">Talep süreç statü ID'leri (malzemeTalepEtGetir=false iken kullanılır)</param>
-        /// <returns>Filtrelenmiş malzeme talep listesi</returns>
-        [Route("MalzemeTalepList")]
-        [HttpGet]
-        [ProducesResponseType(typeof(Result<List<MalzemeTalepGenelBilgiler>>), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public Result<List<MalzemeTalepGenelBilgiler>> MalzemeTalepList([FromQuery] bool malzemeTalepEtGetir = false, [FromQuery] List<int> talepSurecStatuIDs = null)
-        {
-            return _malzemeTalepGenelBilgilerService.MalzemeTalepList(malzemeTalepEtGetir, talepSurecStatuIDs);
-        }
-
-        /// <summary>
         /// Malzeme talebinde bulunma method
         /// </summary>
         /// <param name="request">Talep parametreleri</param>
@@ -85,19 +69,19 @@ namespace Baz.IysServiceApi.Controllers
         /// </summary>
         /// <param name="malzemeTalebiEssizID">Hazırlanacak malzeme talep ID'si</param>
         /// <returns>Hazırlama işlemi sonucu</returns>
-        [Route("MalzemeleriHazirla/{malzemeTalebiEssizID}")]
+        [Route("MalzemeleriHazirla/{malzemeTalepSurecTakipID}")]
         [HttpPost]
         [ProducesResponseType(typeof(Result<bool>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public Result<bool> MalzemeleriHazirla(int malzemeTalebiEssizID)
+        public Result<bool> MalzemeleriHazirla(int malzemeTalepSurecTakipID)
         {
-            if (malzemeTalebiEssizID <= 0)
+            if (malzemeTalepSurecTakipID <= 0)
             {
                 return false.ToResult();
             }
 
-            return _malzemeTalepGenelBilgilerService.MalzemeleriHazirla(malzemeTalebiEssizID);
+            return _malzemeTalepGenelBilgilerService.MalzemeleriHazirla(malzemeTalepSurecTakipID);
         }
 
         /// <summary>
@@ -112,7 +96,7 @@ namespace Baz.IysServiceApi.Controllers
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public Result<bool> MalzemeIadeEt([FromBody] MalzemeIadeEtRequest request)
         {
-            if (request == null || request.MalzemeTalebiEssizID <= 0)
+            if (request == null || request.MalzemeTalepSurecTakipID <= 0)
             {
                 return false.ToResult();
             }
@@ -123,21 +107,21 @@ namespace Baz.IysServiceApi.Controllers
         /// <summary>
         /// Mal kabul etme method
         /// </summary>
-        /// <param name="malzemeTalebiEssizID">Kabul edilecek malzeme talep ID'si</param>
+        /// <param name="malzemeTalepSurecTakipID">Kabul edilecek malzeme talep ID'si</param>
         /// <returns>Kabul işlemi sonucu</returns>
-        [Route("MalKabulEt/{malzemeTalebiEssizID}")]
+        [Route("MalKabulEt/{malzemeTalepSurecTakipID}")]
         [HttpPost]
         [ProducesResponseType(typeof(Result<bool>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public Result<bool> MalKabulEt(int malzemeTalebiEssizID)
+        public Result<bool> MalKabulEt(int malzemeTalepSurecTakipID)
         {
-            if (malzemeTalebiEssizID <= 0)
+            if (malzemeTalepSurecTakipID <= 0)
             {
                 return false.ToResult();
             }
 
-            return _malzemeTalepGenelBilgilerService.MalKabulEt(malzemeTalebiEssizID);
+            return _malzemeTalepGenelBilgilerService.MalKabulEt(malzemeTalepSurecTakipID);
         }
 
         /// <summary>
@@ -152,7 +136,7 @@ namespace Baz.IysServiceApi.Controllers
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public Result<bool> HasarliOlarakIsaretle([FromBody] HasarliOlarakIşaretleRequest request)
         {
-            if (request == null || request.MalzemeTalebiEssizID <= 0)
+            if (request == null || request.MalzemeTalepSurecTakipID <= 0)
             {
                 return false.ToResult();
             }
