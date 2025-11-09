@@ -51,14 +51,14 @@ namespace Baz.IysServiceApi.Controllers
         /// <returns>Talep işlemi sonucu</returns>
         [Route("MalzemeTalepEt")]
         [HttpPost]
-        [ProducesResponseType(typeof(Result<bool>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public Result<bool> MalzemeTalepEt([FromBody] MalzemeTalepEtRequest request)
+        public Result<string> MalzemeTalepEt([FromBody] MalzemeTalepEtRequest request)
         {
-            if (request == null)
+            if (request == null || request.TalepItems == null || request.TalepItems.Count == 0)
             {
-                return false.ToResult();
+                return "Lütfen en az bir malzeme seçiniz.".ToResult();
             }
 
             return _malzemeTalepGenelBilgilerService.MalzemeTalepEt(request);
@@ -67,13 +67,13 @@ namespace Baz.IysServiceApi.Controllers
         /// <summary>
         /// Malzemeleri hazırlamak ve statüsünü güncellemek için method
         /// </summary>
-        /// <param name="malzemeTalebiEssizID">Hazırlanacak malzeme talep ID'si</param>
+        /// <param name="malzemeTalepSurecTakipID">Hazırlanacak malzeme talep ID'si</param>
         /// <returns>Hazırlama işlemi sonucu</returns>
         [Route("MalzemeleriHazirla/{malzemeTalepSurecTakipID}")]
         [HttpPost]
         [ProducesResponseType(typeof(Result<bool>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)] 
         public Result<bool> MalzemeleriHazirla(int malzemeTalepSurecTakipID)
         {
             if (malzemeTalepSurecTakipID <= 0)

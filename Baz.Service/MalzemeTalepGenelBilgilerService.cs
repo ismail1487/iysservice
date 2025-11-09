@@ -28,7 +28,7 @@ namespace Baz.Service
         /// </summary>
         /// <param name="request">Talep parametreleri</param>
         /// <returns>Talep işlemi sonucu</returns>
-        Result<bool> MalzemeTalepEt(MalzemeTalepEtRequest request);
+        Result<string> MalzemeTalepEt(MalzemeTalepEtRequest request);
 
         /// <summary>
         /// Malzemeleri hazırlamak ve statüsünü güncellemek için metod
@@ -109,13 +109,13 @@ namespace Baz.Service
         {
             try
             {
-                // ⭐ YENİ: Süreç takip tablosundan başla (önceki: MalzemeTalepGenelBilgiler'den başlıyordu)
+                // YENİ: Süreç takip tablosundan başla (önceki: MalzemeTalepGenelBilgiler'den başlıyordu)
                 IQueryable<MalzemeTalepSurecTakip> surecQuery = _surecTakipRepository.List(x => x.AktifMi == 1);
 
                 // Statü filtresi
                 if (request.MalzemeTalepEtGetir)
                 {
-                    // ✅ Hemen ToList() ile belleğe al
+                    // Hemen ToList() ile belleğe al
                     var statusOneOrTwoIds = surecQuery.Where(x =>
                         x.ParamTalepSurecStatuID == 1 ||
                         x.ParamTalepSurecStatuID == 2)
@@ -139,17 +139,17 @@ namespace Baz.Service
 
                     var kalanMiktarSureclerIds = _surecTakipRepository.List(x =>
                         kalanMiktarVarIds.Contains(x.MalzemeTalebiEssizID) && x.AktifMi == 1)
-                        .AsEnumerable() // ✅ Önce belleğe al
+                        .AsEnumerable() // Önce belleğe al
                         .GroupBy(x => x.MalzemeTalebiEssizID)
                         .Select(g => g.OrderByDescending(x => x.TabloID).First().TabloID)
                         .ToList();
 
-                    // ✅ Her iki liste de artık List<int>
+                    // Her iki liste de artık List<int>
                     var combinedIds = statusOneOrTwoIds.Union(kalanMiktarSureclerIds).ToList();
 
                     surecQuery = _surecTakipRepository.List(x =>
                         combinedIds.Contains(x.TabloID) && x.AktifMi == 1);
-                    
+
                     if (request.TalepSurecStatuIDs != null && request.TalepSurecStatuIDs.Any())
                     {
                         surecQuery = surecQuery.Where(x => request.TalepSurecStatuIDs.Contains(x.ParamTalepSurecStatuID));
@@ -198,11 +198,13 @@ namespace Baz.Service
                         }
                     }
 
-                    // ⭐ YENİ: Bu süreç için talep edilen miktar (FK ile)
-                    var talepEdilenMiktar = _miktarTarihcesiRepository.List(x =>
-                        x.MalzemeTalepSurecTakipID == surecTakip.TabloID &&
-                        x.AktifMi == 1)
-                        .FirstOrDefault()?.SevkEdilenMiktar ?? 0;
+                    var miktarTarihcesi = _miktarTarihcesiRepository.List(x =>
+                            x.MalzemeTalepSurecTakipID == surecTakip.TabloID &&
+                            x.AktifMi == 1)
+                            .FirstOrDefault();
+
+                    var talepEdilenMiktar = miktarTarihcesi?.SevkEdilenMiktar ?? 0;
+                    var sevkID = miktarTarihcesi?.SevkID;
 
                     var toplamSevkEdilen = _miktarTarihcesiRepository.List(x =>
                         x.MalzemeTalebiEssizID == malzeme.MalzemeTalebiEssizID &&
@@ -229,14 +231,15 @@ namespace Baz.Service
                         MalzemeTalepSurecTakipID = surecTakip.TabloID,
                         MalzemeTalebiEssizID = malzeme.MalzemeTalebiEssizID,
                         MalzemeTalep = malzeme,
-                        TalepEdilenMiktar = talepEdilenMiktar,        
+                        TalepEdilenMiktar = talepEdilenMiktar,
                         ToplamSevkEdilenMiktar = toplamSevkEdilen,
                         KalanMiktar = kalanMiktar,
                         ParamTalepSurecStatuID = surecTakip.ParamTalepSurecStatuID,
                         SurecOlusturmaTarihi = surecTakip.SurecTetiklenmeZamani,
                         SurecStatuGirilenNot = enSonNot?.SurecStatuGirilenNot,
                         SurecStatuBildirimTipiID = enSonNot?.SurecStatuBildirimTipiID,
-                        BildirimTipiTanimlama = bildirimTipiTanimlama
+                        BildirimTipiTanimlama = bildirimTipiTanimlama,
+                        SevkID = sevkID
                     });
                 }
 
@@ -254,137 +257,196 @@ namespace Baz.Service
         /// </summary>
         /// <param name="request">Talep parametreleri</param>
         /// <returns>Talep işlemi sonucu</returns>
-        public Result<bool> MalzemeTalepEt(MalzemeTalepEtRequest request)
+        public Result<string> MalzemeTalepEt(MalzemeTalepEtRequest request)
         {
             try
             {
-                // 1. Ana malzeme kaydı
-                var malzemeTalep = List(x =>
-                    x.MalzemeTalebiEssizID == request.MalzemeTalebiEssizID && x.AktifMi == 1).Value.FirstOrDefault();
-
-                if (malzemeTalep == null)
+                if (request == null || request.TalepItems == null || !request.TalepItems.Any())
                 {
-                    throw new Exception("Malzeme talebi bulunamadı.");
+                    throw new Exception("Lütfen en az bir malzeme seçiniz.");
                 }
 
-                // 2. Kalan miktar kontrolü
-                var oncekiSevkler = _miktarTarihcesiRepository.List(x =>
-                    x.MalzemeTalebiEssizID == request.MalzemeTalebiEssizID && x.AktifMi == 1).ToList();
+                // SevkID üret
+                var sevkID = YeniSevkIDUret();
 
-                var toplamSevkEdilen = oncekiSevkler.Sum(x => x.SevkEdilenMiktar);
-                var mevcutKalanMiktar = malzemeTalep.MalzemeOrijinalTalepEdilenMiktar - toplamSevkEdilen;
-                var aktarılacakMiktar = Math.Min(request.SevkEdilenMiktar, Math.Max(0, mevcutKalanMiktar));
+                // Proje bazında sayım için dictionary
+                var projeBazindaSayim = new Dictionary<int, int>();
+                var basariliIslemSayisi = 0;
+                var hataliIslemler = new List<string>();
 
-                if (aktarılacakMiktar <= 0)
+                foreach (var item in request.TalepItems)
                 {
-                    throw new Exception($"Talep edilen miktar ({request.SevkEdilenMiktar}) mevcut kalan miktardan ({mevcutKalanMiktar}) fazla.");
+                    try
+                    {
+                        // Miktar kontrolü
+                        if (item.SevkEdilenMiktar <= 0)
+                        {
+                            hataliIslemler.Add($"ID {item.MalzemeTalebiEssizID}: Geçersiz miktar");
+                            continue;
+                        }
+
+                        // 1. Ana malzeme kaydı
+                        var malzemeTalep = List(x =>
+                            x.MalzemeTalebiEssizID == item.MalzemeTalebiEssizID && x.AktifMi == 1).Value.FirstOrDefault();
+
+                        if (malzemeTalep == null)
+                        {
+                            hataliIslemler.Add($"ID {item.MalzemeTalebiEssizID}: Malzeme talebi bulunamadı");
+                            continue;
+                        }
+
+                        // 2. Kalan miktar kontrolü
+                        var oncekiSevkler = _miktarTarihcesiRepository.List(x =>
+                            x.MalzemeTalebiEssizID == item.MalzemeTalebiEssizID && x.AktifMi == 1).ToList();
+
+                        var toplamSevkEdilen = oncekiSevkler.Sum(x => x.SevkEdilenMiktar);
+                        var mevcutKalanMiktar = malzemeTalep.MalzemeOrijinalTalepEdilenMiktar - toplamSevkEdilen;
+                        var aktarilacakMiktar = Math.Min(item.SevkEdilenMiktar, Math.Max(0, mevcutKalanMiktar));
+
+                        if (aktarilacakMiktar <= 0)
+                        {
+                            hataliIslemler.Add($"ID {item.MalzemeTalebiEssizID}: Kalan miktar yetersiz (Talep: {item.SevkEdilenMiktar}, Kalan: {mevcutKalanMiktar})");
+                            continue;
+                        }
+
+                        if (aktarilacakMiktar < item.SevkEdilenMiktar)
+                        {
+                            hataliIslemler.Add($"ID {item.MalzemeTalebiEssizID}: Uyarı - Talep edilen {item.SevkEdilenMiktar}, ancak {aktarilacakMiktar} aktarıldı");
+                        }
+
+                        var kalanMiktar = Math.Max(0, mevcutKalanMiktar - aktarilacakMiktar);
+
+                        // 3. Süreç takip kontrolü: Güncelle mi, yeni mi?
+                        var enSonSurecTakip = _surecTakipRepository.List(x =>
+                            x.MalzemeTalebiEssizID == item.MalzemeTalebiEssizID && x.AktifMi == 1)
+                            .OrderByDescending(x => x.TabloID)
+                            .FirstOrDefault();
+
+                        MalzemeTalepSurecTakip aktifSurecTakip = null;
+
+                        if (enSonSurecTakip != null &&
+                            (enSonSurecTakip.ParamTalepSurecStatuID == 1 || enSonSurecTakip.ParamTalepSurecStatuID == 2))
+                        {
+                            // İlk kez talep ediliyor → Mevcut kaydı güncelle
+                            enSonSurecTakip.ParamTalepSurecStatuID = 3;
+                            enSonSurecTakip.SurecTetiklenmeZamani = DateTime.Now;
+                            enSonSurecTakip.SurecTetikleyenKisiID = _loginUser?.KisiID ?? 0;
+                            enSonSurecTakip.GuncellenmeTarihi = DateTime.Now;
+                            enSonSurecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 0;
+
+                            _surecTakipRepository.Update(enSonSurecTakip);
+                            _surecTakipRepository.SaveChanges();
+
+                            aktifSurecTakip = enSonSurecTakip;
+                        }
+                        else
+                        {
+                            // Paralel süreç → Yeni kayıt oluştur
+                            var yeniSurecTakip = new MalzemeTalepSurecTakip
+                            {
+                                MalzemeTalebiEssizID = item.MalzemeTalebiEssizID,
+                                ParamTalepSurecStatuID = 3,
+                                SurecTetiklenmeZamani = DateTime.Now,
+                                SurecTetikleyenKisiID = _loginUser?.KisiID ?? 0,
+                                AktifMi = 1,
+                                SilindiMi = 0,
+                                DilID = 1,
+                                KisiID = _loginUser?.KisiID ?? 0,
+                                KurumID = _loginUser?.KurumID ?? 1,
+                                KayitTarihi = DateTime.Now,
+                                KayitEdenID = _loginUser?.KisiID ?? 0,
+                                GuncellenmeTarihi = DateTime.Now,
+                                GuncelleyenKisiID = _loginUser?.KisiID ?? 0
+                            };
+
+                            _surecTakipRepository.Add(yeniSurecTakip);
+                            _surecTakipRepository.SaveChanges();
+
+                            aktifSurecTakip = yeniSurecTakip;
+                        }
+
+                        // 4. Miktar tarihçesi - FK ile bağla
+                        var miktarTarihcesi = new MalzemeTalepMiktarTarihcesi
+                        {
+                            MalzemeTalebiEssizID = item.MalzemeTalebiEssizID,
+                            MalzemeTalepSurecTakipID = aktifSurecTakip.TabloID,
+                            SevkEdilenMiktar = aktarilacakMiktar,
+                            KalanMiktar = kalanMiktar,
+                            SevkZamani = DateTime.Now,
+                            SevkTalepEdenKisiID = _loginUser?.KisiID ?? 0,
+                            MalzemeSevkTalebiYapanDepartmanID = _loginUser?.KurumID ?? 1,
+                            MalzemeSevkTalebiYapanKisiID = _loginUser?.KisiID ?? 0,
+                            SevkID = sevkID,
+                            AktifMi = 1,
+                            SilindiMi = 0,
+                            DilID = 1,
+                            KisiID = _loginUser?.KisiID ?? 0,
+                            KurumID = _loginUser?.KurumID ?? 1,
+                            KayitTarihi = DateTime.Now,
+                            KayitEdenID = _loginUser?.KisiID ?? 0,
+                            GuncellenmeTarihi = DateTime.Now,
+                            GuncelleyenKisiID = _loginUser?.KisiID ?? 0
+                        };
+
+                        _miktarTarihcesiRepository.Add(miktarTarihcesi);
+                        _miktarTarihcesiRepository.SaveChanges();
+
+                        // Proje bazında sayım
+                        if (projeBazindaSayim.ContainsKey(malzemeTalep.ProjeKodu))
+                        {
+                            projeBazindaSayim[malzemeTalep.ProjeKodu]++;
+                        }
+                        else
+                        {
+                            projeBazindaSayim[malzemeTalep.ProjeKodu] = 1;
+                        }
+
+                        basariliIslemSayisi++;
+                    }
+                    catch (Exception ex)
+                    {
+                        hataliIslemler.Add($"ID {item.MalzemeTalebiEssizID}: {ex.Message}");
+                        _logger.LogError(ex, "TopluMalzemeTalepEt - ID {MalzemeTalebiEssizID} için hata", item.MalzemeTalebiEssizID);
+                    }
                 }
 
-                var kalanMiktar = Math.Max(0, mevcutKalanMiktar - aktarılacakMiktar);
-
-                // 3. ⭐ Süreç takip kontrolü: Güncelle mi, yeni mi?
-                var enSonSurecTakip = _surecTakipRepository.List(x =>
-                    x.MalzemeTalebiEssizID == request.MalzemeTalebiEssizID && x.AktifMi == 1)
-                    .OrderByDescending(x => x.TabloID)
-                    .FirstOrDefault();
-
-                // ⭐ Aktif süreç takip kaydını tutacak değişken
-                MalzemeTalepSurecTakip aktifSurecTakip = null;
-
-                if (enSonSurecTakip != null && 
-                    (enSonSurecTakip.ParamTalepSurecStatuID == 1 || enSonSurecTakip.ParamTalepSurecStatuID == 2))
+                // Response mesajı oluştur
+                if (basariliIslemSayisi == 0)
                 {
-                    // ⭐ İlk kez talep ediliyor → Mevcut kaydı güncelle
-                    enSonSurecTakip.ParamTalepSurecStatuID = 3;
-                    enSonSurecTakip.SurecTetiklenmeZamani = DateTime.Now;
-                    enSonSurecTakip.SurecTetikleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID;
-                    enSonSurecTakip.GuncellenmeTarihi = DateTime.Now;
-                    enSonSurecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID;
+                    throw new Exception("Hiçbir talep işlemi başarılı olmadı. Hatalar: " + string.Join("; ", hataliIslemler));
+                }
 
-                    _surecTakipRepository.Update(enSonSurecTakip);
-                    _surecTakipRepository.SaveChanges();
+                // Proje bazında mesaj oluştur
+                var projeMesajlari = new List<string>();
+                foreach (var kvp in projeBazindaSayim.OrderBy(x => x.Key))
+                {
+                    projeMesajlari.Add($"{kvp.Value} kalem {kvp.Key}");
+                }
 
-                    // ⭐ Güncellenmiş kaydı kullan
-                    aktifSurecTakip = enSonSurecTakip;
+                string sonucMesaji;
+                if (projeBazindaSayim.Count == 1)
+                {
+                    // Tek proje
+                    var ilkProje = projeBazindaSayim.First();
+                    sonucMesaji = $"{ilkProje.Value} kalem {ilkProje.Key} projesine talep edildi. Sevk ID: {sevkID}";
                 }
                 else
                 {
-                    // ⭐ Paralel süreç → Yeni kayıt oluştur
-                    var yeniSurecTakip = new MalzemeTalepSurecTakip
-                    {
-                        MalzemeTalebiEssizID = request.MalzemeTalebiEssizID,
-                        ParamTalepSurecStatuID = 3,
-                        SurecTetiklenmeZamani = DateTime.Now,
-                        SurecTetikleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                        AktifMi = 1,
-                        SilindiMi = 0,
-                        DilID = 1,
-                        KisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                        KurumID = _loginUser?.KurumID ?? 1,
-                        KayitTarihi = DateTime.Now,
-                        KayitEdenID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                        GuncellenmeTarihi = DateTime.Now,
-                        GuncelleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID
-                    };
-
-                    _surecTakipRepository.Add(yeniSurecTakip);
-                    _surecTakipRepository.SaveChanges();
-
-                    // ⭐ Yeni oluşturulan kaydı kullan
-                    aktifSurecTakip = yeniSurecTakip;
+                    // Birden fazla proje
+                    sonucMesaji = string.Join(", ", projeMesajlari) + $" projesine talep edildi. Sevk ID: {sevkID}";
                 }
 
-                // 4. ⭐ Miktar tarihçesi - FK ile bağla (aktifSurecTakip artık tanımlı)
-                var miktarTarihcesi = new MalzemeTalepMiktarTarihcesi
+                // Hatalı işlemler varsa uyarı ekle
+                if (hataliIslemler.Any())
                 {
-                    MalzemeTalebiEssizID = request.MalzemeTalebiEssizID,
-                    MalzemeTalepSurecTakipID = aktifSurecTakip.TabloID, // ✅ ARTIK TANIMLI
-                    SevkEdilenMiktar = aktarılacakMiktar,
-                    KalanMiktar = kalanMiktar,
-                    SevkZamani = DateTime.Now,
-                    SevkTalepEdenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                    MalzemeSevkTalebiYapanDepartmanID = _loginUser?.KurumID ?? 1,
-                    MalzemeSevkTalebiYapanKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                    AktifMi = 1,
-                    SilindiMi = 0,
-                    DilID = 1,
-                    KisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                    KurumID = _loginUser?.KurumID ?? 1,
-                    KayitTarihi = DateTime.Now,
-                    KayitEdenID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                    GuncellenmeTarihi = DateTime.Now,
-                    GuncelleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID
-                };
+                    sonucMesaji += $" (Uyarı: {hataliIslemler.Count} işlem başarısız oldu)";
+                }
 
-                _miktarTarihcesiRepository.Add(miktarTarihcesi);
-                _miktarTarihcesiRepository.SaveChanges();
-
-                // 5. Not ekle
-                var surecNot = new MalzemeTalepSurecTakipNotlari
-                {
-                    MalzemeTalepSurecTakipID = aktifSurecTakip.TabloID, // ✅ ARTIK TANIMLI
-                    SurecStatuGirilenNot = request.SurecStatuGirilenNot,
-                    SurecStatuBildirimTipiID = 0,
-                    AktifMi = 1,
-                    SilindiMi = 0,
-                    DilID = 1,
-                    KisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                    KurumID = _loginUser?.KurumID ?? 1,
-                    KayitTarihi = DateTime.Now,
-                    KayitEdenID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID,
-                    GuncellenmeTarihi = DateTime.Now,
-                    GuncelleyenKisiID = _loginUser?.KisiID ?? request.SevkTalepEdenKisiID
-                };
-
-                _surecTakipNotlariRepository.Add(surecNot);
-                _surecTakipNotlariRepository.SaveChanges();
-
-                return true.ToResult();
+                return sonucMesaji.ToResult();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "MalzemeTalepEt hatası: {Message}", ex.Message);
-                throw new Exception("Malzeme talep edilirken hata oluştu: " + ex.Message);
+                throw new Exception("Toplu malzeme talep edilirken hata oluştu: " + ex.Message);
             }
         }
 
@@ -633,6 +695,48 @@ namespace Baz.Service
                 throw new Exception("Malzemeyi hasarlı olarak işaretleme işlemi sırasında hata oluştu: " + ex.Message);
             }
         }
+
+        /// <summary>
+        /// Yeni SevkID üretir - Format: TF2025000000001
+        /// </summary>
+        /// <returns>Yeni SevkID</returns>
+        private string YeniSevkIDUret()
+        {
+            try
+            {
+                var yil = DateTime.Now.Year;
+
+                // Bu yıl için en son kullanılan SevkID'yi bul
+                var sonSevkID = _miktarTarihcesiRepository.List(x =>
+                    x.SevkID != null &&
+                    x.SevkID.StartsWith($"TF{yil}") &&
+                    x.AktifMi == 1)
+                    .OrderByDescending(x => x.SevkID)
+                    .Select(x => x.SevkID)
+                    .FirstOrDefault();
+
+                int yeniSiraNo = 1;
+
+                if (!string.IsNullOrEmpty(sonSevkID))
+                {
+                    // Son SevkID'den sıra numarasını çıkar
+                    // TF2025000000001 -> 000000001 -> 1
+                    var siraNoStr = sonSevkID.Substring(6); // "TF2025" = 6 karakter
+                    if (int.TryParse(siraNoStr, out int sonSiraNo))
+                    {
+                        yeniSiraNo = sonSiraNo + 1;
+                    }
+                }
+
+                // Format: TF{YIL}{SIRANO:9 haneli}
+                var yeniSevkID = $"TF{yil}{yeniSiraNo:D9}";
+                return yeniSevkID;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("SevkID üretilirken hata oluştu: " + ex.Message);
+            }
+        }
     }
 
     /// <summary>
@@ -715,6 +819,26 @@ namespace Baz.Service
         /// Bildirim tipi tanımlaması
         /// </summary>
         public string BildirimTipiTanimlama { get; set; }
+        /// <summary>
+        /// Sevk ID - Format: TF2025000000001
+        /// </summary>
+        public string SevkID { get; set; }
+    }
+
+    /// <summary>
+    /// Toplu malzeme talep item
+    /// </summary>
+    public class TopluMalzemeTalepItem
+    {
+        /// <summary>
+        /// Malzeme talebi essiz ID
+        /// </summary>
+        public int MalzemeTalebiEssizID { get; set; }
+
+        /// <summary>
+        /// Sevk edilen miktar
+        /// </summary>
+        public int SevkEdilenMiktar { get; set; }
     }
 
     /// <summary>
@@ -725,32 +849,7 @@ namespace Baz.Service
         /// <summary>
         /// Malzeme talebi essiz ID'si
         /// </summary>
-        public int MalzemeTalebiEssizID { get; set; }
-
-        /// <summary>
-        /// Sevk edilen miktar
-        /// </summary>
-        public int SevkEdilenMiktar { get; set; }
-
-        /// <summary>
-        /// Sevk talebinde bulunan kişi ID'si
-        /// </summary>
-        public int SevkTalepEdenKisiID { get; set; }
-
-        /// <summary>
-        /// Malzeme sevk talebinde bulunan departman ID'si
-        /// </summary>
-        public int MalzemeSevkTalebiYapanDepartmanID { get; set; }
-
-        /// <summary>
-        /// Malzeme sevk talebinde bulunan kişi ID'si
-        /// </summary>
-        public int MalzemeSevkTalebiYapanKisiID { get; set; }
-
-        /// <summary>
-        /// Süreç statüsü için girilen not
-        /// </summary>
-        public string SurecStatuGirilenNot { get; set; }
+        public List<TopluMalzemeTalepItem> TalepItems { get; set; }
     }
 
     /// <summary>
