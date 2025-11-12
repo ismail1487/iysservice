@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Baz.ProcessResult;
 using Baz.Service;
 using Microsoft.AspNetCore.Http;
@@ -54,11 +55,11 @@ namespace Baz.IysServiceApi.Controllers
         [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public Result<string> MalzemeTalepEt([FromBody] MalzemeTalepEtRequest request)
+        public Task<Result<string>> MalzemeTalepEt([FromBody] MalzemeTalepEtRequest request)
         {
             if (request == null || request.TalepItems == null || request.TalepItems.Count == 0)
             {
-                return "Lütfen en az bir malzeme seçiniz.".ToResult();
+                return Task.FromResult("Lütfen en az bir malzeme seçiniz.".ToResult());
             }
 
             return _malzemeTalepGenelBilgilerService.MalzemeTalepEt(request);
@@ -73,7 +74,7 @@ namespace Baz.IysServiceApi.Controllers
         [HttpPost]
         [ProducesResponseType(typeof(Result<bool>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status500InternalServerError)] 
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public Result<bool> MalzemeleriHazirla(int malzemeTalepSurecTakipID)
         {
             if (malzemeTalepSurecTakipID <= 0)
@@ -142,6 +143,26 @@ namespace Baz.IysServiceApi.Controllers
             }
 
             return _malzemeTalepGenelBilgilerService.HasarliOlarakIsaretle(request);
+        }
+
+        /// <summary>
+        /// Toplu SAT bilgisi güncelleme method
+        /// </summary>
+        /// <param name="request">Güncelleme parametreleri</param>
+        /// <returns>Güncelleme işlemi sonucu</returns>
+        [Route("TopluSATBilgisiGuncelle")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<string> TopluSATBilgisiGuncelle([FromBody] TopluSATBilgisiGuncellemeRequest request)
+        {
+            if (request == null || request.Items == null || request.Items.Count == 0)
+            {
+                return "Lütfen en az bir kayıt giriniz.".ToResult();
+            }
+
+            return _malzemeTalepGenelBilgilerService.TopluSATBilgisiGuncelle(request);
         }
     }
 }
