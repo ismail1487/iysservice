@@ -66,23 +66,23 @@ namespace Baz.IysServiceApi.Controllers
         }
 
         /// <summary>
-        /// Malzemeleri hazırlamak ve statüsünü güncellemek için method
+        /// Toplu malzemeleri hazırlamak ve statüsünü güncellemek için method
         /// </summary>
-        /// <param name="malzemeTalepSurecTakipID">Hazırlanacak malzeme talep ID'si</param>
-        /// <returns>Hazırlama işlemi sonucu</returns>
-        [Route("MalzemeleriHazirla/{malzemeTalepSurecTakipID}")]
+        /// <param name="request">Toplu hazırlama parametreleri</param>
+        /// <returns>Hazırlama işlemi sonuç mesajı</returns>
+        [Route("TopluMalzemeleriHazirla")]
         [HttpPost]
-        [ProducesResponseType(typeof(Result<bool>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-        public Result<bool> MalzemeleriHazirla(int malzemeTalepSurecTakipID)
+        public Result<string> TopluMalzemeleriHazirla([FromBody] TopluMalzemeleriHazirlaRequest request)
         {
-            if (malzemeTalepSurecTakipID <= 0)
+            if (request == null || request.Items == null || request.Items.Count == 0)
             {
-                return false.ToResult();
+                return "Lütfen en az bir malzeme seçiniz.".ToResult();
             }
 
-            return _malzemeTalepGenelBilgilerService.MalzemeleriHazirla(malzemeTalepSurecTakipID);
+            return _malzemeTalepGenelBilgilerService.TopluMalzemeleriHazirla(request);
         }
 
         /// <summary>
@@ -123,6 +123,26 @@ namespace Baz.IysServiceApi.Controllers
             }
 
             return _malzemeTalepGenelBilgilerService.MalKabulEt(malzemeTalepSurecTakipID);
+        }
+
+        /// <summary>
+        /// Toplu mal kabul etme method
+        /// </summary>
+        /// <param name="request">Toplu kabul parametreleri</param>
+        /// <returns>Kabul işlemi sonuç mesajı</returns>
+        [Route("TopluMalKabulEt")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<string> TopluMalKabulEt([FromBody] TopluMalKabulEtRequest request)
+        {
+            if (request == null || request.MalzemeTalepSurecTakipIDler == null || request.MalzemeTalepSurecTakipIDler.Count == 0)
+            {
+                return "Lütfen en az bir malzeme seçiniz.".ToResult();
+            }
+
+            return _malzemeTalepGenelBilgilerService.TopluMalKabulEt(request);
         }
 
         /// <summary>
