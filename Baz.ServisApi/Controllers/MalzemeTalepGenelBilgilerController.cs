@@ -184,5 +184,45 @@ namespace Baz.IysServiceApi.Controllers
 
             return _malzemeTalepGenelBilgilerService.TopluSATBilgisiGuncelle(request);
         }
+        
+        /// <summary>
+        /// Depo kabul işlemi (Kabul butonu)
+        /// </summary>
+        /// <param name="request">Kabul parametreleri</param>
+        /// <returns>Kabul işlemi sonucu</returns>
+        [Route("TopluDepoKabul")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<string> TopluDepoKabul([FromBody] TopluDepoKararRequest request)
+        {
+            if (request == null || request.MalzemeTalepSurecTakipIDler == null || request.MalzemeTalepSurecTakipIDler.Count == 0)
+            {
+                return "Lütfen en az bir kayıt seçiniz.".ToResult();
+            }
+
+            return _malzemeTalepGenelBilgilerService.TopluDepoKabul(request);
+        }
+
+        /// <summary>
+        /// Depo red işlemi (Red butonu)
+        /// </summary>
+        /// <param name="request">Red parametreleri</param>
+        /// <returns>Red işlemi sonucu</returns>
+        [Route("TopluDepoRed")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<string> TopluDepoRed([FromBody] TopluDepoKararRequest request)
+        {
+            if (request == null || request.MalzemeTalepSurecTakipIDler == null || request.MalzemeTalepSurecTakipIDler.Count == 0)
+            {
+                return "Lütfen en az bir kayıt seçiniz.".ToResult();
+            }
+
+            return _malzemeTalepGenelBilgilerService.TopluDepoRed(request);
+        }
     }
 }

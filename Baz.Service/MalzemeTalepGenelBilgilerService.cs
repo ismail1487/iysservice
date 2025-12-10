@@ -72,6 +72,20 @@ namespace Baz.Service
         /// <param name="request">Güncelleme parametreleri</param>
         /// <returns>Güncelleme işlemi sonucu</returns>
         Result<string> TopluSATBilgisiGuncelle(TopluSATBilgisiGuncellemeRequest request);
+        
+        /// <summary>
+        /// Toplu depo kabul etme metodu
+        /// </summary>
+        /// <param name="request">Kabul parametreleri</param>
+        /// <returns>Kabul işlemi sonucu</returns>
+        Result<string> TopluDepoKabul(TopluDepoKararRequest request);
+
+        /// <summary>
+        /// Toplu depo red etme metodu
+        /// </summary>
+        /// <param name="request">Red parametreleri</param>
+        /// <returns>Red işlemi sonucu</returns>
+        Result<string> TopluDepoRed(TopluDepoKararRequest request);
     }
 
     /// <summary>
@@ -1323,7 +1337,7 @@ namespace Baz.Service
                             continue;
                         }
 
-                        // İlgili MalzemeTalepSurecTakip kaydını bul (Statü 4 olmalı - Üretim Mal Kabul)
+                        // İlgili MalzemeTalepSurecTakip kaydını bul
                         var surecTakip = _surecTakipRepository
                             .List(x => x.TabloID == surecTakipID && x.AktifMi == 1)
                             .FirstOrDefault();
@@ -1334,7 +1348,7 @@ namespace Baz.Service
                             continue;
                         }
 
-                        // Bu süreç takip kaydının tarihçesini getir (HazirId'yi bulmak için)
+                        // Bu süreç takip kaydının tarihçesini getir
                         var miktarTarihcesi = _miktarTarihcesiRepository
                             .List(x => x.MalzemeTalepSurecTakipID == surecTakipID && x.AktifMi == 1)
                             .FirstOrDefault();
@@ -1365,7 +1379,7 @@ namespace Baz.Service
 
                         if (mevcutOnayKaydi != null)
                         {
-                            // Mevcut OnayId'yi kullan (3. madde gereği - güncelleme)
+                            // Mevcut OnayId'yi kullan
                             onayId = mevcutOnayKaydi.OnayId;
                         }
                         else
@@ -1382,19 +1396,22 @@ namespace Baz.Service
                         _miktarTarihcesiRepository.Update(miktarTarihcesi);
                         _miktarTarihcesiRepository.SaveChanges();
 
-                        // Kaydın statüsünü 6 olarak güncelle (Depo Kabul)
-                        surecTakip.ParamTalepSurecStatuID = 6;
-                        surecTakip.SurecTetiklenmeZamani = DateTime.Now;
-                        surecTakip.GuncellenmeTarihi = DateTime.Now;
-                        surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 1;
-
-                        _surecTakipRepository.Update(surecTakip);
-                        var saveResult = _surecTakipRepository.SaveChanges();
-
-                        if (saveResult <= 0)
+                        // ✅ YENİ: Eğer statü 7 (Hasarlı) ise, statüyü 4'e (Üretim Mal Kabul) çevir
+                        if (surecTakip.ParamTalepSurecStatuID == 7)
                         {
-                            hataliIslemler.Add($"ID {surecTakipID}: Statü güncellemesi kaydedilemedi");
-                            continue;
+                            surecTakip.ParamTalepSurecStatuID = 4;
+                            surecTakip.SurecTetiklenmeZamani = DateTime.Now;
+                            surecTakip.GuncellenmeTarihi = DateTime.Now;
+                            surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 1;
+
+                            _surecTakipRepository.Update(surecTakip);
+                            var saveResult = _surecTakipRepository.SaveChanges();
+
+                            if (saveResult <= 0)
+                            {
+                                hataliIslemler.Add($"ID {surecTakipID}: Statü güncellemesi kaydedilemedi");
+                                continue;
+                            }
                         }
 
                         // Proje bazında sayım
@@ -1440,11 +1457,11 @@ namespace Baz.Service
                 if (projeBazindaSayim.Count == 1)
                 {
                     var ilkProje = projeBazindaSayim.First();
-                    sonucMesaji = $"{ilkProje.Value} kalem {ilkProje.Key} projesine mal kabul edildi.";
+                    sonucMesaji = $"{ilkProje.Value} kalem {ilkProje.Key} projesine onaylandı.";
                 }
                 else
                 {
-                    sonucMesaji = string.Join(", ", projeMesajlari) + " projesine mal kabul edildi.";
+                    sonucMesaji = string.Join(", ", projeMesajlari) + " onaylandı.";
                 }
 
                 if (hataliIslemler.Any())
@@ -1630,6 +1647,252 @@ namespace Baz.Service
             }
         }
 
+        /// <summary>
+        /// Toplu depo kabul etme metodu
+        /// </summary>
+        public Result<string> TopluDepoKabul(TopluDepoKararRequest request)
+        {
+            try
+            {
+                if (request == null || request.MalzemeTalepSurecTakipIDler == null || !request.MalzemeTalepSurecTakipIDler.Any())
+                {
+                    throw new Exception("Lütfen en az bir malzeme seçiniz.");
+                }
+
+                var basariliIslemSayisi = 0;
+                var hataliIslemler = new List<string>();
+                var projeBazindaSayim = new Dictionary<int, int>();
+
+                foreach (var surecTakipID in request.MalzemeTalepSurecTakipIDler)
+                {
+                    try
+                    {
+                        if (surecTakipID <= 0)
+                        {
+                            hataliIslemler.Add($"ID {surecTakipID}: Geçersiz ID");
+                            continue;
+                        }
+
+                        // Süreç takip kaydını bul (Statü 6 olmalı - Depo Kabul)
+                        var surecTakip = _surecTakipRepository
+                            .List(x => x.TabloID == surecTakipID && x.AktifMi == 1)
+                            .FirstOrDefault();
+
+                        if (surecTakip == null)
+                        {
+                            hataliIslemler.Add($"ID {surecTakipID}: Kayıt bulunamadı");
+                            continue;
+                        }
+
+                        // Statü kontrolü - Sadece statü 6 olanlar kabul edilebilir
+                        if (surecTakip.ParamTalepSurecStatuID != 6)
+                        {
+                            hataliIslemler.Add($"ID {surecTakipID}: Sadece Depo Kabul statüsündeki kayıtlar onaylanabilir");
+                            continue;
+                        }
+
+                        // Statüyü 8'e güncelle (Depo Onaylandı)
+                        surecTakip.ParamTalepSurecStatuID = 8;
+                        surecTakip.SurecTetiklenmeZamani = DateTime.Now;
+                        surecTakip.GuncellenmeTarihi = DateTime.Now;
+                        surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 1;
+
+                        _surecTakipRepository.Update(surecTakip);
+                        var saveResult = _surecTakipRepository.SaveChanges();
+
+                        if (saveResult <= 0)
+                        {
+                            hataliIslemler.Add($"ID {surecTakipID}: Statü güncellemesi kaydedilemedi");
+                            continue;
+                        }
+
+                        // Proje bazında sayım
+                        var malzemeTalep = _repository
+                            .List(x => x.MalzemeTalebiEssizID == surecTakip.MalzemeTalebiEssizID && x.AktifMi == 1)
+                            .FirstOrDefault();
+
+                        if (malzemeTalep != null)
+                        {
+                            if (projeBazindaSayim.ContainsKey(malzemeTalep.ProjeKodu))
+                            {
+                                projeBazindaSayim[malzemeTalep.ProjeKodu]++;
+                            }
+                            else
+                            {
+                                projeBazindaSayim[malzemeTalep.ProjeKodu] = 1;
+                            }
+                        }
+
+                        basariliIslemSayisi++;
+                    }
+                    catch (Exception ex)
+                    {
+                        hataliIslemler.Add($"ID {surecTakipID}: {ex.Message}");
+                        _logger.LogError(ex, "TopluDepoKabul - ID {SurecTakipID} için hata", surecTakipID);
+                    }
+                }
+
+                // Response mesajı oluştur
+                if (basariliIslemSayisi == 0)
+                {
+                    throw new Exception("Hiçbir kabul işlemi başarılı olmadı. Hatalar: " + string.Join("; ", hataliIslemler));
+                }
+
+                // Proje bazında mesaj oluştur
+                var projeMesajlari = new List<string>();
+                foreach (var kvp in projeBazindaSayim.OrderBy(x => x.Key))
+                {
+                    projeMesajlari.Add($"{kvp.Value} kalem {kvp.Key}");
+                }
+
+                string sonucMesaji;
+                if (projeBazindaSayim.Count == 1)
+                {
+                    var ilkProje = projeBazindaSayim.First();
+                    sonucMesaji = $"{ilkProje.Value} kalem {ilkProje.Key} projesine depo kabul edildi.";
+                }
+                else
+                {
+                    sonucMesaji = string.Join(", ", projeMesajlari) + " projesine depo kabul edildi.";
+                }
+
+                if (hataliIslemler.Any())
+                {
+                    sonucMesaji += $" (Uyarı: {hataliIslemler.Count} işlem başarısız oldu)";
+                }
+
+                return sonucMesaji.ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "TopluDepoKabul hatası: {Message}", ex.Message);
+                throw new Exception("Toplu depo kabul işlemi sırasında hata oluştu: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Toplu depo red etme metodu
+        /// </summary>
+        public Result<string> TopluDepoRed(TopluDepoKararRequest request)
+        {
+            try
+            {
+                if (request == null || request.MalzemeTalepSurecTakipIDler == null || !request.MalzemeTalepSurecTakipIDler.Any())
+                {
+                    throw new Exception("Lütfen en az bir malzeme seçiniz.");
+                }
+
+                var basariliIslemSayisi = 0;
+                var hataliIslemler = new List<string>();
+                var projeBazindaSayim = new Dictionary<int, int>();
+
+                foreach (var surecTakipID in request.MalzemeTalepSurecTakipIDler)
+                {
+                    try
+                    {
+                        if (surecTakipID <= 0)
+                        {
+                            hataliIslemler.Add($"ID {surecTakipID}: Geçersiz ID");
+                            continue;
+                        }
+
+                        // Süreç takip kaydını bul (Statü 6 olmalı - Depo Kabul)
+                        var surecTakip = _surecTakipRepository
+                            .List(x => x.TabloID == surecTakipID && x.AktifMi == 1)
+                            .FirstOrDefault();
+
+                        if (surecTakip == null)
+                        {
+                            hataliIslemler.Add($"ID {surecTakipID}: Kayıt bulunamadı");
+                            continue;
+                        }
+
+                        // Statü kontrolü - Sadece statü 6 olanlar red edilebilir
+                        if (surecTakip.ParamTalepSurecStatuID != 6)
+                        {
+                            hataliIslemler.Add($"ID {surecTakipID}: Sadece Depo Kabul statüsündeki kayıtlar red edilebilir");
+                            continue;
+                        }
+
+                        // Statüyü 7'ye güncelle (Hasarlı)
+                        surecTakip.ParamTalepSurecStatuID = 7;
+                        surecTakip.SurecTetiklenmeZamani = DateTime.Now;
+                        surecTakip.GuncellenmeTarihi = DateTime.Now;
+                        surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 1;
+
+                        _surecTakipRepository.Update(surecTakip);
+                        var saveResult = _surecTakipRepository.SaveChanges();
+
+                        if (saveResult <= 0)
+                        {
+                            hataliIslemler.Add($"ID {surecTakipID}: Statü güncellemesi kaydedilemedi");
+                            continue;
+                        }
+
+                        // Proje bazında sayım
+                        var malzemeTalep = _repository
+                            .List(x => x.MalzemeTalebiEssizID == surecTakip.MalzemeTalebiEssizID && x.AktifMi == 1)
+                            .FirstOrDefault();
+
+                        if (malzemeTalep != null)
+                        {
+                            if (projeBazindaSayim.ContainsKey(malzemeTalep.ProjeKodu))
+                            {
+                                projeBazindaSayim[malzemeTalep.ProjeKodu]++;
+                            }
+                            else
+                            {
+                                projeBazindaSayim[malzemeTalep.ProjeKodu] = 1;
+                            }
+                        }
+
+                        basariliIslemSayisi++;
+                    }
+                    catch (Exception ex)
+                    {
+                        hataliIslemler.Add($"ID {surecTakipID}: {ex.Message}");
+                        _logger.LogError(ex, "TopluDepoRed - ID {SurecTakipID} için hata", surecTakipID);
+                    }
+                }
+
+                // Response mesajı oluştur
+                if (basariliIslemSayisi == 0)
+                {
+                    throw new Exception("Hiçbir red işlemi başarılı olmadı. Hatalar: " + string.Join("; ", hataliIslemler));
+                }
+
+                // Proje bazında mesaj oluştur
+                var projeMesajlari = new List<string>();
+                foreach (var kvp in projeBazindaSayim.OrderBy(x => x.Key))
+                {
+                    projeMesajlari.Add($"{kvp.Value} kalem {kvp.Key}");
+                }
+
+                string sonucMesaji;
+                if (projeBazindaSayim.Count == 1)
+                {
+                    var ilkProje = projeBazindaSayim.First();
+                    sonucMesaji = $"{ilkProje.Value} kalem {ilkProje.Key} projesine depo red edildi.";
+                }
+                else
+                {
+                    sonucMesaji = string.Join(", ", projeMesajlari) + " projesine depo red edildi.";
+                }
+
+                if (hataliIslemler.Any())
+                {
+                    sonucMesaji += $" (Uyarı: {hataliIslemler.Count} işlem başarısız oldu)";
+                }
+
+                return sonucMesaji.ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "TopluDepoRed hatası: {Message}", ex.Message);
+                throw new Exception("Toplu depo red işlemi sırasında hata oluştu: " + ex.Message);
+            }
+        }
+        
         /// <summary>
         /// Yeni SevkID üretir - Format: TF2025000000001
         /// </summary>
@@ -2052,6 +2315,17 @@ namespace Baz.Service
     {
         /// <summary>
         /// Kabul edilecek malzeme talep süreç takip ID'leri listesi
+        /// </summary>
+        public List<int> MalzemeTalepSurecTakipIDler { get; set; }
+    }
+    
+    /// <summary>
+    /// Toplu depo karar (Kabul/Red) request modeli
+    /// </summary>
+    public class TopluDepoKararRequest
+    {
+        /// <summary>
+        /// İşlem yapılacak malzeme talep süreç takip ID'leri listesi
         /// </summary>
         public List<int> MalzemeTalepSurecTakipIDler { get; set; }
     }
