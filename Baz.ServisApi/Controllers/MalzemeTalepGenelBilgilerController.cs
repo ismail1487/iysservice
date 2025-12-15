@@ -224,5 +224,80 @@ namespace Baz.IysServiceApi.Controllers
 
             return _malzemeTalepGenelBilgilerService.TopluDepoRed(request);
         }
+
+        /// <summary>
+        /// MalzemeTalepEt işleminin son işlemini geri alma method
+        /// Kullanıcının en son yaptığı talep işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonuç mesajı</returns>
+        [Route("MalzemeTalepEtSonIslemGeriAl")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<string> MalzemeTalepEtSonIslemGeriAl()
+        {
+            return _malzemeTalepGenelBilgilerService.MalzemeTalepEtSonIslemGeriAl();
+        }
+
+        /// <summary>
+        /// Depo hazırlama işleminin son işlemini geri alma method
+        /// Kullanıcının en son yaptığı hazırlama işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonuç mesajı</returns>
+        [Route("DepoHazirlamaSonIslemGeriAl")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<string> DepoHazirlamaSonIslemGeriAl()
+        {
+            return _malzemeTalepGenelBilgilerService.DepoHazirlamaSonIslemGeriAl();
+        }
+
+        /// <summary>
+        /// Üretim mal kabul işleminin son işlemini geri alma method
+        /// Kullanıcının en son yaptığı mal kabul/iade işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonuç mesajı</returns>
+        [Route("UretimMalKabulSonIslemGeriAl")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<string> UretimMalKabulSonIslemGeriAl()
+        {
+            return _malzemeTalepGenelBilgilerService.UretimMalKabulSonIslemGeriAl();
+        }
+
+        /// <summary>
+        /// Kalite kontrol işleminin son işlemini geri alma method
+        /// Kullanıcının en son yaptığı kalite onay/hasarlı işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonuç mesajı</returns>
+        [Route("KaliteKontrolSonIslemGeriAl")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<string> KaliteKontrolSonIslemGeriAl()
+        {
+            return _malzemeTalepGenelBilgilerService.KaliteKontrolSonIslemGeriAl();
+        }
+
+        /// <summary>
+        /// Üretim İade Depo Karar işleminin son işlemini geri alma endpoint'i
+        /// Kullanıcının en son yaptığı depo kabul/red işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonuç mesajı</returns>
+        [Route("DepoKararSonIslemGeriAl")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Result<string> DepoKararSonIslemGeriAl()
+        {
+            return _malzemeTalepGenelBilgilerService.DepoKararSonIslemGeriAl();
+        }
     }
 }

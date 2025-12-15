@@ -86,6 +86,41 @@ namespace Baz.Service
         /// <param name="request">Red parametreleri</param>
         /// <returns>Red işlemi sonucu</returns>
         Result<string> TopluDepoRed(TopluDepoKararRequest request);
+
+        /// <summary>
+        /// MalzemeTalepEt işleminin son işlemini geri alma metodu
+        /// Kullanıcının en son yaptığı talep işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonucu</returns>
+        Result<string> MalzemeTalepEtSonIslemGeriAl();
+
+        /// <summary>
+        /// Depo hazırlama işleminin son işlemini geri alma metodu
+        /// Kullanıcının en son yaptığı hazırlama işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonucu</returns>
+        Result<string> DepoHazirlamaSonIslemGeriAl();
+
+        /// <summary>
+        /// Üretim Mal Kabul işleminin son işlemini geri alma metodu
+        /// Kullanıcının en son yaptığı mal kabul/iade işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonucu</returns>
+        Result<string> UretimMalKabulSonIslemGeriAl();
+
+        /// <summary>
+        /// Kalite Kontrol (Depo Kabul) işleminin son işlemini geri alma metodu
+        /// Kullanıcının en son yaptığı mal kabul/hasarlı işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonucu</returns>
+        Result<string> KaliteKontrolSonIslemGeriAl();
+
+        /// <summary>
+        /// Üretim İade Depo Karar işleminin son işlemini geri alma metodu
+        /// Kullanıcının en son yaptığı depo kabul/red işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonucu</returns>
+        Result<string> DepoKararSonIslemGeriAl();
     }
 
     /// <summary>
@@ -1413,6 +1448,15 @@ namespace Baz.Service
                                 continue;
                             }
                         }
+                        else
+                        {
+                            // Normal mal kabul: Statü değişmez (4'te kalır), sadece GuncelleyenKisiID set et
+                            surecTakip.GuncellenmeTarihi = DateTime.Now;
+                            surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 1;
+
+                            _surecTakipRepository.Update(surecTakip);
+                            _surecTakipRepository.SaveChanges();
+                        }
 
                         // Proje bazında sayım
                         var malzemeTalep = _repository
@@ -1522,7 +1566,6 @@ namespace Baz.Service
                     {
                         MalzemeTalepSurecTakipID = surecTakip.TabloID,
                         SurecStatuGirilenNot = request.SurecStatuGirilenNot,
-                        SurecStatuBildirimTipiID = request.SurecStatuBildirimTipiID,
                         // BaseModel zorunlu alanları
                         AktifMi = 1,
                         SilindiMi = 0,
@@ -1894,6 +1937,78 @@ namespace Baz.Service
         }
         
         /// <summary>
+        /// Üretim İade Depo Karar işleminin son işlemini geri alma metodu
+        /// Kullanıcının en son yaptığı depo kabul (statü 8) veya depo red (statü 7) işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonucu</returns>
+        public Result<string> DepoKararSonIslemGeriAl()
+        {
+            try
+            {
+                // Giriş yapan kullanıcı ID'si
+                var kullaniciID = _loginUser?.KisiID ?? 0;
+
+                if (kullaniciID <= 0)
+                {
+                    throw new Exception("Kullanıcı bilgisi alınamadı.");
+                }
+
+                // Kullanıcının en son güncellediği statü 7 veya 8 olan kayıtları bul
+                // Statü 7 = Hasarlı (Depo Red)
+                // Statü 8 = Depo Onaylandı (Depo Kabul)
+                var sonIslem = _surecTakipRepository
+                    .List(x => x.GuncelleyenKisiID == kullaniciID &&
+                               (x.ParamTalepSurecStatuID == 7 || x.ParamTalepSurecStatuID == 8) &&
+                               x.AktifMi == 1)
+                    .OrderByDescending(x => x.GuncellenmeTarihi)
+                    .FirstOrDefault();
+
+                if (sonIslem == null)
+                {
+                    throw new Exception("Geri alınacak Depo Karar işlemi bulunamadı.");
+                }
+
+                var mevcutStatu = sonIslem.ParamTalepSurecStatuID;
+
+                // Statüyü 6'ya (Depo Kabul - Kalite Kontrol) geri al
+                sonIslem.ParamTalepSurecStatuID = 6;
+                sonIslem.GuncellenmeTarihi = DateTime.Now;
+                sonIslem.GuncelleyenKisiID = kullaniciID;
+
+                _surecTakipRepository.Update(sonIslem);
+                _surecTakipRepository.SaveChanges();
+
+                // Eğer statü 7 (Hasarlı) ise, ilgili not kaydını soft-delete yap
+                if (mevcutStatu == 7)
+                {
+                    var notKaydi = _surecTakipNotlariRepository
+                        .List(x => x.MalzemeTalepSurecTakipID == sonIslem.TabloID && x.AktifMi == 1)
+                        .OrderByDescending(x => x.TabloID)
+                        .FirstOrDefault();
+
+                    if (notKaydi != null)
+                    {
+                        notKaydi.AktifMi = 0;
+                        notKaydi.SilindiMi = 1;
+                        notKaydi.GuncellenmeTarihi = DateTime.Now;
+                        notKaydi.GuncelleyenKisiID = kullaniciID;
+
+                        _surecTakipNotlariRepository.Update(notKaydi);
+                        _surecTakipNotlariRepository.SaveChanges();
+                    }
+                }
+
+                var islemTipi = mevcutStatu == 7 ? "Depo Red" : "Depo Kabul";
+                return $"{islemTipi} işlemi başarıyla geri alındı.".ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "DepoKararSonIslemGeriAl hatası: {Message}", ex.Message);
+                throw new Exception("Depo Karar geri alma işlemi sırasında hata oluştu: " + ex.Message);
+            }
+        }
+        
+        /// <summary>
         /// Yeni SevkID üretir - Format: TF2025000000001
         /// </summary>
         /// <returns>Yeni SevkID</returns>
@@ -2014,6 +2129,668 @@ namespace Baz.Service
             }
 
             return $"{prefix}{siradakiNo:D9}"; // ON2025000000001 formatında
+        }
+
+        /// <summary>
+        /// MalzemeTalepEt işleminin son işlemini geri alma metodu
+        /// Kullanıcının en son yaptığı talep işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonucu</returns>
+        public Result<string> MalzemeTalepEtSonIslemGeriAl()
+        {
+            try
+            {
+                // 1. Kullanıcının en son yaptığı işlemi bul
+                var kullaniciID = _loginUser?.KisiID ?? 0;
+                
+                if (kullaniciID == 0)
+                {
+                    throw new Exception("Kullanıcı bilgisi bulunamadı. Lütfen tekrar giriş yapınız.");
+                }
+                
+                _logger.LogInformation($"Geri alma işlemi başlatılıyor. KullanıcıID: {kullaniciID}");
+                
+                // Önce kullanıcının tüm kayıtlarını kontrol et (debug için)
+                var tumKayitlar = _miktarTarihcesiRepository
+                    .List(x => x.AktifMi == 1)
+                    .ToList();
+                
+                _logger.LogInformation($"Toplam aktif miktar tarihçesi kayıt sayısı: {tumKayitlar.Count}");
+                
+                var kullaniciKayitlari = tumKayitlar
+                    .Where(x => x.SevkID != null && 
+                               (x.SevkTalepEdenKisiID == kullaniciID || x.MalzemeSevkTalebiYapanKisiID == kullaniciID))
+                    .ToList();
+                
+                _logger.LogInformation($"Kullanıcıya ait kayıt sayısı: {kullaniciKayitlari.Count}");
+                
+                if (!kullaniciKayitlari.Any())
+                {
+                    // Detaylı hata mesajı
+                    var ornekKayit = tumKayitlar.FirstOrDefault();
+                    var mesaj = $"Geri alınacak işlem bulunamadı. KullanıcıID: {kullaniciID}";
+                    
+                    if (ornekKayit != null)
+                    {
+                        mesaj += $" | Örnek kayıt - SevkTalepEdenKisiID: {ornekKayit.SevkTalepEdenKisiID}, MalzemeSevkTalebiYapanKisiID: {ornekKayit.MalzemeSevkTalebiYapanKisiID}";
+                    }
+                    
+                    throw new Exception(mesaj);
+                }
+                
+                // En son kaydı bul
+                var enSonSevk = kullaniciKayitlari
+                    .OrderByDescending(x => x.SevkZamani)
+                    .ThenByDescending(x => x.TabloID)
+                    .FirstOrDefault();
+
+                if (enSonSevk == null)
+                {
+                    throw new Exception("Geri alınacak işlem bulunamadı (sıralama sonrası null).");
+                }
+
+                var sevkID = enSonSevk.SevkID;
+                
+                _logger.LogInformation($"Geri alma işlemi başlatıldı. KullanıcıID: {kullaniciID}, SevkID: {sevkID}, SevkZamani: {enSonSevk.SevkZamani}");
+
+                // 2. Bu SevkID'ye ait tüm MalzemeTalepMiktarTarihcesi kayıtlarını bul
+                var miktarTarihcesiKayitlari = _miktarTarihcesiRepository
+                    .List(x => x.SevkID == sevkID && x.AktifMi == 1)
+                    .ToList();
+
+                if (!miktarTarihcesiKayitlari.Any())
+                {
+                    throw new Exception($"SevkID: {sevkID} için aktif kayıt bulunamadı.");
+                }
+
+                // 3. Bu kayıtların herhangi biri işlenmiş mi kontrol et
+                var islenmisKayitlar = miktarTarihcesiKayitlari
+                    .Where(x => !string.IsNullOrEmpty(x.HazirId) || !string.IsNullOrEmpty(x.OnayId))
+                    .ToList();
+
+                if (islenmisKayitlar.Any())
+                {
+                    throw new Exception("Bu talep zaten işlenmeye başlandı. Geri alınamaz.");
+                }
+
+                var projeBazindaSayim = new Dictionary<int, int>();
+                var geriAlinanMalzemeIDler = new List<int>();
+                var geriAlinanEkTalepIDler = new List<int>();
+
+                // 4. Her bir miktar tarihçesi kaydını işle
+                foreach (var miktarKaydi in miktarTarihcesiKayitlari)
+                {
+                    // 4.1. İlgili MalzemeTalepSurecTakip kaydını bul
+                    var surecTakip = _surecTakipRepository
+                        .List(x => x.TabloID == miktarKaydi.MalzemeTalepSurecTakipID && x.AktifMi == 1)
+                        .FirstOrDefault();
+
+                    if (surecTakip != null)
+                    {
+                        // 4.2. Ana malzeme kaydını kontrol et
+                        var malzemeTalep = _repository
+                            .List(x => x.MalzemeTalebiEssizID == miktarKaydi.MalzemeTalebiEssizID && x.AktifMi == 1)
+                            .FirstOrDefault();
+
+                        if (malzemeTalep != null)
+                        {
+                            // 4.3. Ek talep oluşturulmuş mu kontrol et
+                            var ekTalepKaydi = _repository
+                                .List(x => x.BaglantiliMalzemeTalebiEssizID == malzemeTalep.MalzemeTalebiEssizID && 
+                                           x.AktifMi == 1)
+                                .FirstOrDefault();
+
+                            if (ekTalepKaydi != null)
+                            {
+                                // Ek talebi pasif yap (soft delete)
+                                ekTalepKaydi.AktifMi = 0;
+                                ekTalepKaydi.SilindiMi = 1;
+                                ekTalepKaydi.GuncellenmeTarihi = DateTime.Now;
+                                ekTalepKaydi.GuncelleyenKisiID = _loginUser?.KisiID ?? 0;
+
+                                _repository.Update(ekTalepKaydi);
+                                _repository.SaveChanges();
+
+                                // Ek talebin süreç takip kayıtlarını da pasif yap
+                                var ekTalepSurecler = _surecTakipRepository
+                                    .List(x => x.MalzemeTalebiEssizID == ekTalepKaydi.MalzemeTalebiEssizID && x.AktifMi == 1)
+                                    .ToList();
+
+                                foreach (var ekSurec in ekTalepSurecler)
+                                {
+                                    ekSurec.AktifMi = 0;
+                                    ekSurec.SilindiMi = 1;
+                                    ekSurec.GuncellenmeTarihi = DateTime.Now;
+                                    ekSurec.GuncelleyenKisiID = _loginUser?.KisiID ?? 0;
+
+                                    _surecTakipRepository.Update(ekSurec);
+                                }
+                                _surecTakipRepository.SaveChanges();
+
+                                geriAlinanEkTalepIDler.Add(ekTalepKaydi.MalzemeTalebiEssizID);
+
+                                _logger.LogInformation(
+                                    $"Ek talep geri alındı: MalzemeTalebiEssizID={ekTalepKaydi.MalzemeTalebiEssizID}");
+                            }
+
+                            // 4.4. Süreç takip durumunu kontrol et ve eski statüye döndür
+                            if (surecTakip.ParamTalepSurecStatuID == 3)
+                            {
+                                // Statü 3 ise (Talep Edildi), eski statüyü bul
+                                // Bu malzeme için daha önceki süreç kayıtlarını kontrol et
+                                var oncekiSurecler = _surecTakipRepository
+                                    .List(x => x.MalzemeTalebiEssizID == miktarKaydi.MalzemeTalebiEssizID && 
+                                               x.TabloID < surecTakip.TabloID && 
+                                               x.AktifMi == 1)
+                                    .OrderByDescending(x => x.TabloID)
+                                    .FirstOrDefault();
+
+                                if (oncekiSurecler != null)
+                                {
+                                    // Daha önceki bir süreç varsa, mevcut kaydı pasif yap
+                                    surecTakip.AktifMi = 0;
+                                    surecTakip.SilindiMi = 1;
+                                    surecTakip.GuncellenmeTarihi = DateTime.Now;
+                                    surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 0;
+
+                                    _surecTakipRepository.Update(surecTakip);
+                                    _surecTakipRepository.SaveChanges();
+                                }
+                                else
+                                {
+                                    // İlk talep ise, statüyü 1 veya 2'ye geri döndür
+                                    // Malzemenin gelip gelmediğine göre karar ver
+                                    // Varsayılan olarak 1 (Gelmedi) yapalım
+                                    surecTakip.ParamTalepSurecStatuID = 1;
+                                    surecTakip.SurecTetiklenmeZamani = DateTime.Now;
+                                    surecTakip.GuncellenmeTarihi = DateTime.Now;
+                                    surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 0;
+
+                                    _surecTakipRepository.Update(surecTakip);
+                                    _surecTakipRepository.SaveChanges();
+                                }
+                            }
+
+                            // Proje bazında sayım
+                            if (!geriAlinanMalzemeIDler.Contains(malzemeTalep.MalzemeTalebiEssizID))
+                            {
+                                geriAlinanMalzemeIDler.Add(malzemeTalep.MalzemeTalebiEssizID);
+
+                                if (projeBazindaSayim.ContainsKey(malzemeTalep.ProjeKodu))
+                                {
+                                    projeBazindaSayim[malzemeTalep.ProjeKodu]++;
+                                }
+                                else
+                                {
+                                    projeBazindaSayim[malzemeTalep.ProjeKodu] = 1;
+                                }
+                            }
+                        }
+                    }
+
+                    // 4.5. MalzemeTalepMiktarTarihcesi kaydını pasif yap
+                    miktarKaydi.AktifMi = 0;
+                    miktarKaydi.SilindiMi = 1;
+                    miktarKaydi.GuncellenmeTarihi = DateTime.Now;
+                    miktarKaydi.GuncelleyenKisiID = _loginUser?.KisiID ?? 0;
+
+                    _miktarTarihcesiRepository.Update(miktarKaydi);
+                }
+
+                _miktarTarihcesiRepository.SaveChanges();
+
+                // 5. Response mesajı oluştur
+                var projeMesajlari = new List<string>();
+                foreach (var kvp in projeBazindaSayim.OrderBy(x => x.Key))
+                {
+                    projeMesajlari.Add($"{kvp.Value} kalem {kvp.Key}");
+                }
+
+                string sonucMesaji;
+                if (projeBazindaSayim.Count == 1)
+                {
+                    var ilkProje = projeBazindaSayim.First();
+                    sonucMesaji = $"{ilkProje.Value} kalem {ilkProje.Key} projesine ait talep geri alındı. (Sevk No: {sevkID})";
+                }
+                else if (projeBazindaSayim.Count > 1)
+                {
+                    sonucMesaji = string.Join(", ", projeMesajlari) + $" projesine ait talepler geri alındı. (Sevk No: {sevkID})";
+                }
+                else
+                {
+                    sonucMesaji = $"Talep geri alındı. (Sevk No: {sevkID})";
+                }
+
+                if (geriAlinanEkTalepIDler.Any())
+                {
+                    sonucMesaji += $" [{geriAlinanEkTalepIDler.Count} ek talep de geri alındı]";
+                }
+
+                return sonucMesaji.ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "MalzemeTalepEtSonIslemGeriAl hatası: {Message}", ex.Message);
+                throw new Exception("Talep geri alma işlemi sırasında hata oluştu: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Depo hazırlama işleminin son işlemini geri alma metodu
+        /// Kullanıcının en son yaptığı hazırlama işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonucu</returns>
+        public Result<string> DepoHazirlamaSonIslemGeriAl()
+        {
+            try
+            {
+                // 1. Kullanıcının en son yaptığı hazırlama işlemini bul
+                var kullaniciID = _loginUser?.KisiID ?? 0;
+                
+                if (kullaniciID == 0)
+                {
+                    throw new Exception("Kullanıcı bilgisi bulunamadı. Lütfen tekrar giriş yapınız.");
+                }
+                
+                _logger.LogInformation($"Depo hazırlama geri alma işlemi başlatılıyor. KullanıcıID: {kullaniciID}");
+                
+                // Kullanıcının tüm hazırlama kayıtlarını getir (HazirId olan kayıtlar)
+                var tumKayitlar = _miktarTarihcesiRepository
+                    .List(x => x.AktifMi == 1 && x.HazirId != null)
+                    .ToList();
+                
+                _logger.LogInformation($"Toplam aktif HazirId'li kayıt sayısı: {tumKayitlar.Count}");
+                
+                // Kullanıcının yaptığı hazırlama işlemlerini bul
+                // Not: Hazırlama işlemini yapan kişi GuncelleyenKisiID alanında tutuluyor
+                var kullaniciHazirlamaKayitlari = tumKayitlar
+                    .Where(x => x.GuncelleyenKisiID == kullaniciID)
+                    .ToList();
+                
+                _logger.LogInformation($"Kullanıcıya ait hazırlama kayıt sayısı: {kullaniciHazirlamaKayitlari.Count}");
+                
+                if (!kullaniciHazirlamaKayitlari.Any())
+                {
+                    throw new Exception($"Geri alınacak hazırlama işlemi bulunamadı. Henüz hazırlama yapmadınız.");
+                }
+                
+                // En son hazırlama işlemini bul (GuncellenmeTarihi'ne göre)
+                var enSonHazirlamaKaydi = kullaniciHazirlamaKayitlari
+                    .OrderByDescending(x => x.GuncellenmeTarihi)
+                    .ThenByDescending(x => x.TabloID)
+                    .FirstOrDefault();
+
+                if (enSonHazirlamaKaydi == null)
+                {
+                    throw new Exception("Geri alınacak hazırlama işlemi bulunamadı (sıralama sonrası null).");
+                }
+
+                var hazirId = enSonHazirlamaKaydi.HazirId;
+                
+                _logger.LogInformation($"Geri alma işlemi başlatıldı. KullanıcıID: {kullaniciID}, HazirId: {hazirId}, GüncellenmeTarihi: {enSonHazirlamaKaydi.GuncellenmeTarihi}");
+
+                // 2. Bu HazirId'ye ait tüm kayıtları bul
+                var hazirIdKayitlari = _miktarTarihcesiRepository
+                    .List(x => x.HazirId == hazirId && x.AktifMi == 1)
+                    .ToList();
+
+                if (!hazirIdKayitlari.Any())
+                {
+                    throw new Exception($"HazirId: {hazirId} için aktif kayıt bulunamadı.");
+                }
+
+                // 3. Bu kayıtların herhangi biri onaylanmış mı kontrol et
+                var onaylanmisKayitlar = hazirIdKayitlari
+                    .Where(x => !string.IsNullOrEmpty(x.OnayId))
+                    .ToList();
+
+                if (onaylanmisKayitlar.Any())
+                {
+                    throw new Exception("Bu hazırlama işlemi zaten onaylandı. Geri alınamaz.");
+                }
+
+                var projeBazindaSayim = new Dictionary<int, int>();
+                var geriAlinanMalzemeIDler = new List<int>();
+
+                // 4. Her bir kayıt için geri alma işlemi
+                foreach (var miktarKaydi in hazirIdKayitlari)
+                {
+                    // 4.1. İlgili MalzemeTalepSurecTakip kaydını bul
+                    var surecTakip = _surecTakipRepository
+                        .List(x => x.TabloID == miktarKaydi.MalzemeTalepSurecTakipID && x.AktifMi == 1)
+                        .FirstOrDefault();
+
+                    if (surecTakip != null)
+                    {
+                        // Statüyü 3'e geri döndür (Talep Edildi)
+                        surecTakip.ParamTalepSurecStatuID = 3;
+                        surecTakip.SurecTetiklenmeZamani = DateTime.Now;
+                        surecTakip.GuncellenmeTarihi = DateTime.Now;
+                        surecTakip.GuncelleyenKisiID = _loginUser?.KisiID ?? 0;
+
+                        _surecTakipRepository.Update(surecTakip);
+                        _surecTakipRepository.SaveChanges();
+
+                        // 4.2. Ana malzeme kaydını bul (proje bazında sayım için)
+                        var malzemeTalep = _repository
+                            .List(x => x.MalzemeTalebiEssizID == miktarKaydi.MalzemeTalebiEssizID && x.AktifMi == 1)
+                            .FirstOrDefault();
+
+                        if (malzemeTalep != null)
+                        {
+                            // Proje bazında sayım
+                            if (!geriAlinanMalzemeIDler.Contains(malzemeTalep.MalzemeTalebiEssizID))
+                            {
+                                geriAlinanMalzemeIDler.Add(malzemeTalep.MalzemeTalebiEssizID);
+
+                                if (projeBazindaSayim.ContainsKey(malzemeTalep.ProjeKodu))
+                                {
+                                    projeBazindaSayim[malzemeTalep.ProjeKodu]++;
+                                }
+                                else
+                                {
+                                    projeBazindaSayim[malzemeTalep.ProjeKodu] = 1;
+                                }
+                            }
+                        }
+                    }
+
+                    // 4.3. MalzemeTalepMiktarTarihcesi kaydını güncelle
+                    // IslenenMiktar'ı sıfırla, HazirId'yi temizle
+                    miktarKaydi.IslenenMiktar = 0;
+                    miktarKaydi.HazirId = null;
+                    miktarKaydi.GuncellenmeTarihi = DateTime.Now;
+                    miktarKaydi.GuncelleyenKisiID = _loginUser?.KisiID ?? 0;
+
+                    _miktarTarihcesiRepository.Update(miktarKaydi);
+                }
+
+                _miktarTarihcesiRepository.SaveChanges();
+
+                // 5. Response mesajı oluştur
+                var projeMesajlari = new List<string>();
+                foreach (var kvp in projeBazindaSayim.OrderBy(x => x.Key))
+                {
+                    projeMesajlari.Add($"{kvp.Value} kalem {kvp.Key}");
+                }
+
+                string sonucMesaji;
+                if (projeBazindaSayim.Count == 1)
+                {
+                    var ilkProje = projeBazindaSayim.First();
+                    sonucMesaji = $"{ilkProje.Value} kalem {ilkProje.Key} projesine ait hazırlama işlemi geri alındı. (Hazır No: {hazirId})";
+                }
+                else if (projeBazindaSayim.Count > 1)
+                {
+                    sonucMesaji = string.Join(", ", projeMesajlari) + $" projesine ait hazırlama işlemleri geri alındı. (Hazır No: {hazirId})";
+                }
+                else
+                {
+                    sonucMesaji = $"Hazırlama işlemi geri alındı. (Hazır No: {hazirId})";
+                }
+
+                return sonucMesaji.ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "DepoHazirlamaSonIslemGeriAl hatası: {Message}", ex.Message);
+                throw new Exception("Hazırlama geri alma işlemi sırasında hata oluştu: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Üretim Mal Kabul işleminin son işlemini geri alma metodu
+        /// Kullanıcının en son yaptığı mal kabul (statü 6) veya iade (statü 5) işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonucu</returns>
+        public Result<string> UretimMalKabulSonIslemGeriAl()
+        {
+            try
+            {
+                var kullaniciID = _loginUser?.KisiID ?? 0;
+                
+                if (kullaniciID == 0)
+                {
+                    throw new Exception("Kullanıcı bilgisi bulunamadı. Lütfen tekrar giriş yapınız.");
+                }
+                
+                _logger.LogInformation($"Üretim Mal Kabul geri alma işlemi başlatılıyor. KullanıcıID: {kullaniciID}");
+                
+                // Kullanıcının statü 5 (İade) veya statü 6 (Depo Kabul) olan kayıtlarını getir
+                var tumKayitlar = _surecTakipRepository
+                    .List(x => x.AktifMi == 1 && (x.ParamTalepSurecStatuID == 4 || x.ParamTalepSurecStatuID == 6))
+                    .ToList();
+                
+                _logger.LogInformation($"Toplam statü 5/6 kayıt sayısı: {tumKayitlar.Count}");
+                
+                // Kullanıcının güncellediği kayıtları bul
+                var kullaniciKayitlari = tumKayitlar
+                    .Where(x => x.GuncelleyenKisiID == kullaniciID)
+                    .ToList();
+                
+                _logger.LogInformation($"Kullanıcıya ait statü 4/6 kayıt sayısı: {kullaniciKayitlari.Count}");
+                
+                if (!kullaniciKayitlari.Any())
+                {
+                    throw new Exception("Geri alınacak mal kabul/iade işlemi bulunamadı. Henüz işlem yapmadınız.");
+                }
+                
+                // En son işlemi bul (GuncellenmeTarihi'ne göre)
+                var enSonIslem = kullaniciKayitlari
+                    .OrderByDescending(x => x.GuncellenmeTarihi)
+                    .ThenByDescending(x => x.TabloID)
+                    .FirstOrDefault();
+
+                if (enSonIslem == null)
+                {
+                    throw new Exception("Geri alınacak işlem bulunamadı (sıralama sonrası null).");
+                }
+
+                var oncekiStatu = enSonIslem.ParamTalepSurecStatuID;
+                var islemTipi = oncekiStatu == 6 ? "Mal Kabul" : "İade";
+                
+                _logger.LogInformation($"Geri alma işlemi başlatıldı. SurecTakipID: {enSonIslem.TabloID}, Statü: {oncekiStatu} ({islemTipi}), GüncellenmeTarihi: {enSonIslem.GuncellenmeTarihi}");
+
+                // İlgili malzeme bilgisini al
+                var malzemeTalep = _repository
+                    .List(x => x.MalzemeTalebiEssizID == enSonIslem.MalzemeTalebiEssizID && x.AktifMi == 1)
+                    .FirstOrDefault();
+
+                if (malzemeTalep == null)
+                {
+                    throw new Exception($"MalzemeTalebiEssizID: {enSonIslem.MalzemeTalebiEssizID} için malzeme kaydı bulunamadı.");
+                }
+
+                // Eğer statü 6 (Mal Kabul) ise OnayId'yi temizle
+                if (oncekiStatu == 4)
+                {
+                    var miktarTarihcesi = _miktarTarihcesiRepository
+                        .List(x => x.MalzemeTalepSurecTakipID == enSonIslem.TabloID && x.AktifMi == 1)
+                        .FirstOrDefault();
+
+                    if (miktarTarihcesi != null)
+                    {
+                        // OnayId'yi temizle
+                        miktarTarihcesi.OnayId = null;
+                        miktarTarihcesi.GuncellenmeTarihi = DateTime.Now;
+                        miktarTarihcesi.GuncelleyenKisiID = kullaniciID;
+
+                        _miktarTarihcesiRepository.Update(miktarTarihcesi);
+                        _miktarTarihcesiRepository.SaveChanges();
+                    }
+                }
+
+                // Eğer statü 5 (İade) ise, en son not kaydını soft-delete yap
+                if (oncekiStatu == 5)
+                {
+                    var enSonNot = _surecTakipNotlariRepository
+                        .List(x => x.MalzemeTalepSurecTakipID == enSonIslem.TabloID && x.AktifMi == 1)
+                        .OrderByDescending(x => x.TabloID)
+                        .FirstOrDefault();
+
+                    if (enSonNot != null)
+                    {
+                        enSonNot.AktifMi = 0;
+                        enSonNot.SilindiMi = 1;
+                        enSonNot.GuncellenmeTarihi = DateTime.Now;
+                        enSonNot.GuncelleyenKisiID = kullaniciID;
+
+                        _surecTakipNotlariRepository.Update(enSonNot);
+                        _surecTakipNotlariRepository.SaveChanges();
+                    }
+                }
+
+                // Statüyü 4'e (Üretim Mal Kabul) geri döndür
+                enSonIslem.ParamTalepSurecStatuID = 4;
+                enSonIslem.SurecTetiklenmeZamani = DateTime.Now;
+                enSonIslem.GuncellenmeTarihi = DateTime.Now;
+                enSonIslem.GuncelleyenKisiID = kullaniciID;
+
+                _surecTakipRepository.Update(enSonIslem);
+                _surecTakipRepository.SaveChanges();
+
+                var sonucMesaji = $"{malzemeTalep.MalzemeKodu} - {malzemeTalep.MalzemeIsmi} için {islemTipi} işlemi geri alındı.";
+                
+                _logger.LogInformation($"Üretim Mal Kabul geri alma işlemi başarılı. SurecTakipID: {enSonIslem.TabloID}");
+
+                return sonucMesaji.ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "UretimMalKabulSonIslemGeriAl hatası: {Message}", ex.Message);
+                throw new Exception("Üretim mal kabul geri alma işlemi sırasında hata oluştu: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Kalite Kontrol (Depo Kabul) işleminin son işlemini geri alma metodu
+        /// Kullanıcının en son yaptığı mal kabul (statü 8) veya hasarlı (statü 7) işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonucu</returns>
+        public Result<string> KaliteKontrolSonIslemGeriAl()
+        {
+            try
+            {
+                var kullaniciID = _loginUser?.KisiID ?? 0;
+                
+                if (kullaniciID == 0)
+                {
+                    throw new Exception("Kullanıcı bilgisi bulunamadı. Lütfen tekrar giriş yapınız.");
+                }
+                
+                _logger.LogInformation($"Kalite Kontrol geri alma işlemi başlatılıyor. KullanıcıID: {kullaniciID}");
+                
+                // Kullanıcının statü 6 (onaylanmış), 7 (Hasarlı) veya statü 8 (Kalite Onay) olan kayıtlarını getir
+                var tumKayitlar = _surecTakipRepository
+                    .List(x => x.AktifMi == 1 && (x.ParamTalepSurecStatuID == 6 || x.ParamTalepSurecStatuID == 7 || x.ParamTalepSurecStatuID == 8))
+                    .ToList();
+                
+                _logger.LogInformation($"Toplam statü 6/7/8 kayıt sayısı: {tumKayitlar.Count}");
+                
+                // Kullanıcının güncellediği kayıtları bul
+                var kullaniciKayitlari = tumKayitlar
+                    .Where(x => x.GuncelleyenKisiID == kullaniciID)
+                    .ToList();
+                
+                _logger.LogInformation($"Kullanıcıya ait statü 6/7/8 kayıt sayısı: {kullaniciKayitlari.Count}");
+                
+                // Statü 6 olanlar için sadece OnayId'si olanları al
+                var filtrelenmisKayitlar = new List<MalzemeTalepSurecTakip>();
+                foreach (var kayit in kullaniciKayitlari)
+                {
+                    if (kayit.ParamTalepSurecStatuID == 6)
+                    {
+                        // Statü 6 ise OnayId kontrolü yap
+                        var miktarTarihcesi = _miktarTarihcesiRepository
+                            .List(x => x.MalzemeTalepSurecTakipID == kayit.TabloID && x.AktifMi == 1)
+                            .FirstOrDefault();
+                        
+                        if (miktarTarihcesi != null && !string.IsNullOrEmpty(miktarTarihcesi.OnayId))
+                        {
+                            filtrelenmisKayitlar.Add(kayit);
+                        }
+                    }
+                    else
+                    {
+                        // Statü 7 veya 8 ise direkt ekle
+                        filtrelenmisKayitlar.Add(kayit);
+                    }
+                }
+                
+                _logger.LogInformation($"OnayId filtresi sonrası kayıt sayısı: {filtrelenmisKayitlar.Count}");
+                
+                if (!filtrelenmisKayitlar.Any())
+                {
+                    throw new Exception("Geri alınacak kalite kontrol işlemi bulunamadı. Henüz işlem yapmadınız.");
+                }
+                
+                // En son işlemi bul (GuncellenmeTarihi'ne göre)
+                var enSonIslem = filtrelenmisKayitlar
+                    .OrderByDescending(x => x.GuncellenmeTarihi)
+                    .ThenByDescending(x => x.TabloID)
+                    .FirstOrDefault();
+
+                if (enSonIslem == null)
+                {
+                    throw new Exception("Geri alınacak işlem bulunamadı (sıralama sonrası null).");
+                }
+
+                var oncekiStatu = enSonIslem.ParamTalepSurecStatuID;
+                var islemTipi = oncekiStatu == 6 ? "Kalite Onay" : (oncekiStatu == 8 ? "Kalite Onay" : "Hasarlı");
+                
+                _logger.LogInformation($"Geri alma işlemi başlatıldı. SurecTakipID: {enSonIslem.TabloID}, Statü: {oncekiStatu} ({islemTipi}), GuncellenmeTarihi: {enSonIslem.GuncellenmeTarihi}");
+
+                // İlgili malzeme bilgisini al
+                var malzemeTalep = _repository
+                    .List(x => x.MalzemeTalebiEssizID == enSonIslem.MalzemeTalebiEssizID && x.AktifMi == 1)
+                    .FirstOrDefault();
+
+                if (malzemeTalep == null)
+                {
+                    throw new Exception($"MalzemeTalebiEssizID: {enSonIslem.MalzemeTalebiEssizID} için malzeme kaydı bulunamadı.");
+                }
+
+                // Eğer statü 7 (Hasarlı) ise, en son not kaydını soft-delete yap
+                if (oncekiStatu == 7)
+                {
+                    var enSonNot = _surecTakipNotlariRepository
+                        .List(x => x.MalzemeTalepSurecTakipID == enSonIslem.TabloID && x.AktifMi == 1)
+                        .OrderByDescending(x => x.TabloID)
+                        .FirstOrDefault();
+
+                    if (enSonNot != null)
+                    {
+                        enSonNot.AktifMi = 0;
+                        enSonNot.SilindiMi = 1;
+                        enSonNot.GuncellenmeTarihi = DateTime.Now;
+                        enSonNot.GuncelleyenKisiID = kullaniciID;
+
+                        _surecTakipNotlariRepository.Update(enSonNot);
+                        _surecTakipNotlariRepository.SaveChanges();
+                    }
+                }
+
+                
+                    enSonIslem.ParamTalepSurecStatuID = 5; // İade durumuna geri döndür
+                    enSonIslem.SurecTetiklenmeZamani = DateTime.Now;
+                
+                enSonIslem.GuncellenmeTarihi = DateTime.Now;
+                enSonIslem.GuncelleyenKisiID = kullaniciID;
+
+                _surecTakipRepository.Update(enSonIslem);
+                _surecTakipRepository.SaveChanges();
+
+                var sonucMesaji = $"{malzemeTalep.MalzemeKodu} - {malzemeTalep.MalzemeIsmi} için {islemTipi} işlemi geri alındı.";
+                
+                _logger.LogInformation($"Kalite Kontrol geri alma işlemi başarılı. SurecTakipID: {enSonIslem.TabloID}");
+
+                return sonucMesaji.ToResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "KaliteKontrolSonIslemGeriAl hatası: {Message}", ex.Message);
+                throw new Exception("Kalite kontrol geri alma işlemi sırasında hata oluştu: " + ex.Message);
+            }
         }
     }
 
@@ -2207,6 +2984,17 @@ namespace Baz.Service
     }
 
     /// <summary>
+    /// Malzeme talep etme geri alma request modeli
+    /// </summary>
+    public class MalzemeTalepEtGeriAlRequest
+    {
+        /// <summary>
+        /// Geri alınacak SevkID (boş bırakılırsa kullanıcının en son yaptığı işlem geri alınır)
+        /// </summary>
+        public string SevkID { get; set; }
+    }
+
+    /// <summary>
     /// Malzemeleri hazırlama item
     /// </summary>
     public class MalzemeleriHazirlaItem
@@ -2264,11 +3052,6 @@ namespace Baz.Service
         /// İşaretlenecek malzeme talep ID'si
         /// </summary>
         public int MalzemeTalepSurecTakipID { get; set; }
-
-        /// <summary>
-        /// Süreç statü bildirim tipi ID'si
-        /// </summary>
-        public int SurecStatuBildirimTipiID { get; set; }
 
         /// <summary>
         /// Süreç statüsü için girilen not
