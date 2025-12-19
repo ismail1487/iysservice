@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Baz.ProcessResult;
 using Baz.Service;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -299,5 +300,22 @@ namespace Baz.IysServiceApi.Controllers
         {
             return _malzemeTalepGenelBilgilerService.DepoKararSonIslemGeriAl();
         }
+
+        /// <summary>
+        /// Üretim İade Depo Karar işleminin son işlemini geri alma endpoint'i
+        /// Kullanıcının en son yaptığı depo kabul/red işlemini otomatik bulup geri alır
+        /// </summary>
+        /// <returns>Geri alma işlemi sonuç mesajı</returns>
+        [Route("MicroVeriCekmeTaskAsync")]
+        [HttpPost]
+        [ProducesResponseType(typeof(Result<string>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        [AllowAnonymous]
+        public Task<Result<string>> MicroVeriCekmeTaskAsync()
+        {
+            return _malzemeTalepGenelBilgilerService.MicroVeriCekmeTaskAsync();
+        }
+
     }
 }
